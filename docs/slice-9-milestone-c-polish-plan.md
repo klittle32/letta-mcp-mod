@@ -94,9 +94,9 @@ Slice 9 implementation kept the proxy-first/lazy-connection design and added:
 
 - explicit metadata pagination tests plus repeated-cursor/max-page guards;
 - bounded `regex: true` cache search;
-- `auth-clear` through proxy and `/mcp` command routing;
+- `auth-clear` through proxy and `/lmcp` command routing;
 - guarded Letta UI status values and short-lived command panels;
-- visible MCP UI resource URIs in list/search/describe and `/mcp tools`;
+- visible MCP UI resource URIs in list/search/describe and `/lmcp tools`;
 - OAuth `client_credentials` token fetching via `auth-start` when `oauth.grantType: "client_credentials"`, `clientId`, `clientSecret`, and `tokenUrl` are configured;
 - permission coverage for `auth-clear`.
 
@@ -251,7 +251,7 @@ Implementation options:
   - cap searchable text length per tool/resource if needed.
 - Avoid adding dependencies unless a real ReDoS-safe regex package is already available and justified.
 - Update `MCP_PROXY_PARAMETERS.regex.description` from deferred wording to supported guarded regex wording.
-- Update `/mcp tools` only if command-level regex UX is added; otherwise keep regex support model-facing through the proxy tool.
+- Update `/lmcp tools` only if command-level regex UX is added; otherwise keep regex support model-facing through the proxy tool.
 
 Verification:
 
@@ -274,7 +274,7 @@ Goal: let a user/agent clear OAuth material for a configured server safely.
 Tests first:
 
 1. `mcp({ action: "auth-clear", server: "remote" })` clears stored tokens/client info/pending auth/discovery state for that server.
-2. `/mcp auth-clear remote` parses and routes if we choose to expose the command alias.
+2. `/lmcp auth-clear remote` parses and routes if we choose to expose the command alias.
 3. Missing server returns the existing OAuth server-required error style.
 4. Unknown server is rejected.
 5. Non-OAuth server returns a concise not-configured-for-OAuth message.
@@ -287,7 +287,7 @@ Implementation:
 2. Decide clear scope:
    - for user-facing `auth-clear`, default to all OAuth credential material for that server URL;
    - if SDK scope enum/type requires scoped clearing, call appropriate scopes in sequence or add a store-level clear helper.
-3. Add parser support in `src/features/mcp-command.ts` if adding `/mcp auth-clear <server>`.
+3. Add parser support in `src/features/mcp-command.ts` if adding `/lmcp auth-clear <server>`.
 4. Update help text and proxy action description.
 5. Update permissions tests if needed.
 
@@ -373,8 +373,8 @@ Grounded API:
 Tests first:
 
 1. No panel is opened if panels capability is absent.
-2. `/mcp reconnect <server>` opens/updates/closes a short panel when panels are available.
-3. `/mcp auth-start <server>` can show “OAuth URL generated” panel, but long URL remains in command output.
+2. `/lmcp reconnect <server>` opens/updates/closes a short panel when panels are available.
+3. `/lmcp auth-start <server>` can show “OAuth URL generated” panel, but long URL remains in command output.
 4. Panel handles are closed on dispose or after TTL.
 5. Panel failures do not break command output.
 
@@ -424,7 +424,7 @@ Implementation options:
 - Minimal first pass:
   - show `uiResourceUri` in `describe`;
   - update result renderer for MCP `resource_link` / `resource` content blocks;
-  - add `/mcp resource <server> <uri>` or proxy action only if it fits existing mode precedence cleanly.
+  - add `/lmcp resource <server> <uri>` or proxy action only if it fits existing mode precedence cleanly.
 - If adding resource reading:
   - use existing manager/client `readResource` path or add a focused method;
   - require explicit server/URI;

@@ -24,52 +24,52 @@ export function parseMcpCommandArgs(rawArgs: string | undefined): ParsedMcpComma
 
   switch (command) {
     case "status":
-      return rest.length === 0 ? { kind: "status" } : usageError("/mcp status does not accept extra arguments.");
+      return rest.length === 0 ? { kind: "status" } : usageError("/lmcp status does not accept extra arguments.");
     case "tools":
-      return rest.length === 0 ? { kind: "tools" } : usageError("/mcp tools does not accept extra arguments.");
+      return rest.length === 0 ? { kind: "tools" } : usageError("/lmcp tools does not accept extra arguments.");
     case "reconnect":
       if (rest.length === 0) return { kind: "reconnect" };
       if (rest.length === 1) return { kind: "reconnect", serverName: rest[0] };
-      return usageError("/mcp reconnect accepts at most one server name.");
+      return usageError("/lmcp reconnect accepts at most one server name.");
     case "auth-start":
-      return rest.length === 1 ? { kind: "oauth", action: "auth-start", serverName: rest[0] } : usageError("/mcp auth-start requires exactly one server name.");
+      return rest.length === 1 ? { kind: "oauth", action: "auth-start", serverName: rest[0] } : usageError("/lmcp auth-start requires exactly one server name.");
     case "auth-complete": {
       const match = trimmed.match(/^auth-complete\s+(\S+)\s+([\s\S]+)$/);
-      if (!match) return usageError("/mcp auth-complete requires a server name and redirected URL.");
+      if (!match) return usageError("/lmcp auth-complete requires a server name and redirected URL.");
       return { kind: "oauth", action: "auth-complete", serverName: match[1], rawArgs: JSON.stringify({ redirectUrl: match[2].trim() }) };
     }
     case "auth-status":
       if (rest.length === 0) return { kind: "oauth", action: "auth-status" };
       if (rest.length === 1) return { kind: "oauth", action: "auth-status", serverName: rest[0] };
-      return usageError("/mcp auth-status accepts at most one server name.");
+      return usageError("/lmcp auth-status accepts at most one server name.");
     case "auth-clear":
-      return rest.length === 1 ? { kind: "oauth", action: "auth-clear", serverName: rest[0] } : usageError("/mcp auth-clear requires exactly one server name.");
+      return rest.length === 1 ? { kind: "oauth", action: "auth-clear", serverName: rest[0] } : usageError("/lmcp auth-clear requires exactly one server name.");
     case "setup":
       if (rest.length === 0) return { kind: "setup", create: false };
       if (rest.length === 1 && (rest[0] === "create" || rest[0] === "--write")) return { kind: "setup", create: true };
-      return usageError("/mcp setup accepts only 'create' or '--write'.");
+      return usageError("/lmcp setup accepts only 'create' or '--write'.");
     case "help":
     case "--help":
-      return rest.length === 0 ? { kind: "help" } : usageError(`/mcp ${command} does not accept extra arguments.`);
+      return rest.length === 0 ? { kind: "help" } : usageError(`/lmcp ${command} does not accept extra arguments.`);
     default:
-      return { kind: "error", message: `Unknown /mcp command "${command}".\n\n${formatCommandHelp()}` };
+      return { kind: "error", message: `Unknown /lmcp command "${command}".\n\n${formatCommandHelp()}` };
   }
 }
 
 export function formatCommandHelp(): string {
   return [
     "Usage:",
-    "- /mcp — show MCP adapter status",
-    "- /mcp status — show MCP adapter status",
-    "- /mcp tools — list cached MCP tools",
-    "- /mcp reconnect — reconnect and refresh all configured servers",
-    "- /mcp reconnect <server> — reconnect and refresh one server",
-    "- /mcp auth-start <server> — start OAuth login for one server",
-    "- /mcp auth-complete <server> <redirectUrl> — finish OAuth login with the redirected URL",
-    "- /mcp auth-status <server> — show OAuth token status for one server",
-    "- /mcp auth-clear <server> — clear stored OAuth credentials for one server",
-    "- /mcp setup — show config paths and starter .mcp.json",
-    "- /mcp setup create — create a starter project .mcp.json if missing",
+    "- /lmcp — show MCP adapter status",
+    "- /lmcp status — show MCP adapter status",
+    "- /lmcp tools — list cached MCP tools",
+    "- /lmcp reconnect — reconnect and refresh all configured servers",
+    "- /lmcp reconnect <server> — reconnect and refresh one server",
+    "- /lmcp auth-start <server> — start OAuth login for one server",
+    "- /lmcp auth-complete <server> <redirectUrl> — finish OAuth login with the redirected URL",
+    "- /lmcp auth-status <server> — show OAuth token status for one server",
+    "- /lmcp auth-clear <server> — clear stored OAuth credentials for one server",
+    "- /lmcp setup — show config paths and starter .mcp.json",
+    "- /lmcp setup create — create a starter project .mcp.json if missing",
   ].join("\n");
 }
 
@@ -85,13 +85,13 @@ export function formatStatusCommand(state: ProxyState): string {
     executeStatus(state),
     "",
     "Commands:",
-    "- /mcp tools — list cached MCP tools",
-    "- /mcp reconnect — reconnect and refresh all configured servers",
-    "- /mcp reconnect <server> — reconnect and refresh one server",
-    "- /mcp auth-start <server> — start OAuth login for one server",
-    "- /mcp auth-complete <server> <redirectUrl> — finish OAuth login",
-    "- /mcp auth-clear <server> — clear stored OAuth credentials",
-    "- /mcp setup — show config paths and starter .mcp.json",
+    "- /lmcp tools — list cached MCP tools",
+    "- /lmcp reconnect — reconnect and refresh all configured servers",
+    "- /lmcp reconnect <server> — reconnect and refresh one server",
+    "- /lmcp auth-start <server> — start OAuth login for one server",
+    "- /lmcp auth-complete <server> <redirectUrl> — finish OAuth login",
+    "- /lmcp auth-clear <server> — clear stored OAuth credentials",
+    "- /lmcp setup — show config paths and starter .mcp.json",
   ].join("\n");
 }
 
@@ -101,19 +101,19 @@ export function formatToolsCommand(state: ProxyState): string {
       "Cached MCP tools",
       "",
       "No MCP servers configured.",
-      "Run /mcp setup to see config paths and a starter .mcp.json.",
+      "Run /lmcp setup to see config paths and a starter .mcp.json.",
     ].join("\n");
   }
 
   const serversWithTools = [...state.servers.values()].filter((server) => server.tools.length > 0);
   if (serversWithTools.length === 0) {
     const firstServer = state.servers.keys().next().value as string | undefined;
-    const reconnectOne = firstServer ? ` or /mcp reconnect ${firstServer}` : "";
+    const reconnectOne = firstServer ? ` or /lmcp reconnect ${firstServer}` : "";
     return [
       "Cached MCP tools",
       "",
       "No cached MCP tools are available.",
-      `Run /mcp reconnect${reconnectOne} to refresh metadata.`,
+      `Run /lmcp reconnect${reconnectOne} to refresh metadata.`,
     ].join("\n");
   }
 
@@ -172,7 +172,7 @@ export function formatSetupCommand(ctx: Pick<McpCommandContext, "cwd" | "home" |
     starterMcpConfigJson().trimEnd(),
     "",
     "To create a starter project config, run:",
-    "/mcp setup create",
+    "/lmcp setup create",
   );
 
   return lines.join("\n");
@@ -187,7 +187,7 @@ export function createStarterProjectConfig(ctx: Pick<McpCommandContext, "cwd">):
     return {
       ok: false,
       path,
-      message: [`MCP config already exists:`, path, "", "Plain /mcp setup shows config paths and starter JSON."].join("\n"),
+      message: [`MCP config already exists:`, path, "", "Plain /lmcp setup shows config paths and starter JSON."].join("\n"),
     };
   }
 
@@ -201,7 +201,7 @@ export function createStarterProjectConfig(ctx: Pick<McpCommandContext, "cwd">):
       path,
       "",
       'Edit the "example" server command/args, then run:',
-      "/mcp reconnect example",
+      "/lmcp reconnect example",
     ].join("\n"),
   };
 }
@@ -217,14 +217,14 @@ export async function executeReconnectCommand(
 
   if (serverName) {
     if (!state.servers.has(serverName)) {
-      return `Server "${serverName}" is not configured. Use /mcp status to list configured servers.`;
+      return `Server "${serverName}" is not configured. Use /lmcp status to list configured servers.`;
     }
     return reconnectOne(runtime, ctx, serverName);
   }
 
   const serverNames = [...state.servers.keys()];
   if (serverNames.length === 0) {
-    return ["MCP reconnect", "", "No MCP servers configured.", "Run /mcp setup to see config paths and a starter .mcp.json."].join("\n");
+    return ["MCP reconnect", "", "No MCP servers configured.", "Run /lmcp setup to see config paths and a starter .mcp.json."].join("\n");
   }
 
   const lines = ["MCP reconnect", ""];
@@ -295,7 +295,7 @@ export interface McpCommandUi {
 
 export function createMcpCommand(runtime: AdapterRuntime = createAdapterRuntime(), ui?: McpCommandUi): LettaCommandDefinition {
   return {
-    id: "mcp",
+    id: "lmcp",
     description: "Show MCP adapter status, list cached tools, reconnect servers, manage OAuth login, and display setup guidance.",
     args: "[status|tools|reconnect [server]|auth-start <server>|auth-complete <server> <redirectUrl>|auth-status [server]|auth-clear <server>|setup [create|--write]|help]",
     async run(ctx) {
@@ -314,8 +314,8 @@ export function createMcpCommand(runtime: AdapterRuntime = createAdapterRuntime(
 
 function openMcpCommandPanel(ui: McpCommandUi | undefined, args: string | undefined): { update(options: { content: string | string[] }): void; close(): void } | undefined {
   if (!ui?.capabilities?.ui?.panels || !ui.ui?.openPanel) return undefined;
-  const label = args?.trim() ? `/mcp ${args.trim()}` : "/mcp status";
-  return ui.ui.openPanel({ id: "letta-mcp-command", content: [`Running ${label}...`], order: 100 });
+  const label = args?.trim() ? `/lmcp ${args.trim()}` : "/lmcp status";
+  return ui.ui.openPanel({ id: "letta-lmcp-command", content: [`Running ${label}...`], order: 100 });
 }
 
 export async function executeMcpCommand(rawArgs: string | undefined, runtime: AdapterRuntime, ctx: McpCommandContext): Promise<string> {

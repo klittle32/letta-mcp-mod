@@ -5,7 +5,7 @@ A Letta Code mod that exposes MCP servers through one compact `mcp` proxy tool, 
 ## What this mod provides
 
 - A compact model-callable `mcp` tool for status, search, describe, connect, OAuth, and tool calls.
-- A human `/mcp` slash command for setup, status, cached tool listing, reconnects, and OAuth actions.
+- A human `/lmcp` slash command for setup, status, cached tool listing, reconnects, and OAuth actions.
 - Lazy MCP connections: activation reads local config/cache but does not start MCP server processes or perform HTTP MCP network work.
 - Metadata caching under `~/.letta/mcp-adapter/cache.json`.
 - Stdio, streamable HTTP, and SSE MCP transports.
@@ -64,9 +64,11 @@ Create the directory if needed:
 mkdir -p ~/.letta/mods
 ```
 
-### Option A: copy the built bundle
+### Copy the built bundle
 
-Use this for a stable local install:
+Letta Code currently discovers mod files with filesystem directory entries that
+must be regular files. Do not install this bundle as a symlink: symlinked mods
+are ignored by the loader.
 
 ```bash
 bun run build
@@ -74,17 +76,6 @@ cp dist/letta-mcp-adapter.mjs ~/.letta/mods/letta-mcp-adapter.mjs
 ```
 
 After rebuilding later, copy the file again and reload Letta Code.
-
-### Option B: symlink the built bundle
-
-Use this while developing the mod:
-
-```bash
-bun run build
-ln -sf "$(pwd)/dist/letta-mcp-adapter.mjs" ~/.letta/mods/letta-mcp-adapter.mjs
-```
-
-Re-run `bun run build` after source changes, then reload Letta Code.
 
 ### Reload Letta Code
 
@@ -108,13 +99,13 @@ Later files override earlier files for the same server names and settings. For p
 You can inspect the paths Letta sees with:
 
 ```text
-/mcp setup
+/lmcp setup
 ```
 
 Create a starter project config with:
 
 ```text
-/mcp setup create
+/lmcp setup create
 ```
 
 ## `.mcp.json` examples
@@ -137,7 +128,7 @@ Use stdio for local MCP servers launched as child processes:
 Then refresh metadata:
 
 ```text
-/mcp reconnect filesystem
+/lmcp reconnect filesystem
 ```
 
 ### HTTP server with bearer auth
@@ -163,7 +154,7 @@ Prefer `bearerTokenEnv` over an inline token:
 Run Letta Code with `MCP_REMOTE_TOKEN` in the environment, then:
 
 ```text
-/mcp reconnect remote
+/lmcp reconnect remote
 ```
 
 You can force SSE instead with `"transport": "sse"`. If omitted or set to `"auto"`, the adapter tries streamable HTTP and falls back to SSE.
@@ -194,31 +185,31 @@ Use authorization-code OAuth for user login flows:
 Start login:
 
 ```text
-/mcp auth-start linear
+/lmcp auth-start linear
 ```
 
 Open the returned authorization URL in a browser. After login, copy the full redirected URL and run:
 
 ```text
-/mcp auth-complete linear <full redirected URL>
+/lmcp auth-complete linear <full redirected URL>
 ```
 
 Check local auth state:
 
 ```text
-/mcp auth-status linear
+/lmcp auth-status linear
 ```
 
 Clear stored OAuth material:
 
 ```text
-/mcp auth-clear linear
+/lmcp auth-clear linear
 ```
 
 Finally refresh metadata:
 
 ```text
-/mcp reconnect linear
+/lmcp reconnect linear
 ```
 
 ### OAuth client credentials
@@ -247,13 +238,13 @@ Use client credentials for machine-to-machine OAuth servers:
 Fetch and store a token:
 
 ```text
-/mcp auth-start machine
+/lmcp auth-start machine
 ```
 
 Then refresh metadata:
 
 ```text
-/mcp reconnect machine
+/lmcp reconnect machine
 ```
 
 ### Optional direct tools
@@ -311,7 +302,7 @@ Allow-list specific direct tools:
 Direct-tool workflow:
 
 1. Configure the server.
-2. Run `/mcp reconnect <server>` to cache metadata.
+2. Run `/lmcp reconnect <server>` to cache metadata.
 3. Run `/reload` so Letta Code reactivates the mod and registers direct tools from the cache.
 
 `toolPrefix` controls direct/proxy exposed names:
@@ -320,22 +311,22 @@ Direct-tool workflow:
 - `"short"`: strips a trailing `-mcp` from the server name before prefixing
 - `"none"`: uses original MCP tool names when they are valid and non-conflicting
 
-## `/mcp` command reference
+## `/lmcp` command reference
 
 | Command | Purpose |
 | --- | --- |
-| `/mcp` | Show MCP adapter status. |
-| `/mcp status` | Same as `/mcp`. Shows configured server/cache state and hints. |
-| `/mcp tools` | List cached MCP tools and resource-backed synthetic tools. Does not connect. |
-| `/mcp reconnect` | Connect to every configured server sequentially and refresh metadata cache. |
-| `/mcp reconnect <server>` | Connect to one server and refresh its metadata cache. |
-| `/mcp auth-start <server>` | Start OAuth login, or fetch a client-credentials token for that server. |
-| `/mcp auth-complete <server> <redirectUrl>` | Complete authorization-code OAuth with a copied redirected URL. |
-| `/mcp auth-status <server>` | Show whether local OAuth tokens/client info/pending auth/discovery state exist. |
-| `/mcp auth-clear <server>` | Clear stored OAuth material for a server. |
-| `/mcp setup` | Show config paths and an example `.mcp.json`. |
-| `/mcp setup create` | Create a starter project `.mcp.json` if one does not already exist. |
-| `/mcp help` | Show command usage. |
+| `/lmcp` | Show MCP adapter status. |
+| `/lmcp status` | Same as `/lmcp`. Shows configured server/cache state and hints. |
+| `/lmcp tools` | List cached MCP tools and resource-backed synthetic tools. Does not connect. |
+| `/lmcp reconnect` | Connect to every configured server sequentially and refresh metadata cache. |
+| `/lmcp reconnect <server>` | Connect to one server and refresh its metadata cache. |
+| `/lmcp auth-start <server>` | Start OAuth login, or fetch a client-credentials token for that server. |
+| `/lmcp auth-complete <server> <redirectUrl>` | Complete authorization-code OAuth with a copied redirected URL. |
+| `/lmcp auth-status <server>` | Show whether local OAuth tokens/client info/pending auth/discovery state exist. |
+| `/lmcp auth-clear <server>` | Clear stored OAuth material for a server. |
+| `/lmcp setup` | Show config paths and an example `.mcp.json`. |
+| `/lmcp setup create` | Create a starter project `.mcp.json` if one does not already exist. |
+| `/lmcp help` | Show command usage. |
 
 The command may open a short transient panel when Letta Code exposes panel UI support. Full details remain in command output.
 
@@ -395,7 +386,7 @@ The mod registers a permission overlay when Letta Code exposes the permissions A
 
 Default behavior:
 
-- Read-only status, search, describe, cached server listing, and `/mcp tools` are allowed.
+- Read-only status, search, describe, cached server listing, and `/lmcp tools` are allowed.
 - Connecting or reconnecting a configured server asks, because it may start a process or make network requests.
 - Unknown live targets are denied by default.
 - `auth-status` is allowed because it only reports local state.
@@ -427,7 +418,7 @@ Notes:
 
 - `dangerousTools` controls dangerous-looking tool names and path arguments outside the working directory.
 - `unknownServers` controls attempts to connect/list/call unknown servers.
-- `configWrites` is reserved for future model-callable config-write operations; the current `/mcp setup create` command is human-invoked.
+- `configWrites` is reserved for future model-callable config-write operations; the current `/lmcp setup create` command is human-invoked.
 
 ## UI and resources
 

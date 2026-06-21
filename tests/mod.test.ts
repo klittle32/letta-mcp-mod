@@ -114,13 +114,13 @@ describe("Letta mod registration", () => {
     expect(registeredPermissions[0]).toMatchObject({ id: "letta-mcp-adapter-permissions" });
   });
 
-  it("registers exactly one command id mcp when commands are available", () => {
+  it("registers exactly one command id lmcp when commands are available", () => {
     const { letta, registeredCommands } = createFakeLetta({ tools: false, commands: true });
 
     activate(letta, createFakeRuntime());
 
     expect(registeredCommands).toHaveLength(1);
-    expect(registeredCommands[0]).toMatchObject({ id: "mcp" });
+    expect(registeredCommands[0]).toMatchObject({ id: "lmcp" });
   });
 
   it("registers both tool and command in the same activation", () => {

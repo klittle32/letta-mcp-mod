@@ -140,7 +140,7 @@ describe("direct tool descriptor collection", () => {
     expect(result.descriptors).toEqual([]);
     expect(result.warnings.join("\n")).toContain('Direct tools for "missing" are configured but metadata cache is missing');
     expect(result.warnings.join("\n")).toContain('Direct tools for "stale" are configured but metadata cache is stale');
-    expect(result.warnings.join("\n")).toContain('/mcp reconnect');
+    expect(result.warnings.join("\n")).toContain('/lmcp reconnect');
   });
 
   it("honors excludeTools before direct tool selection", () => {

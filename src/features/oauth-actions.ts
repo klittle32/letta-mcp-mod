@@ -59,7 +59,7 @@ export async function executeAuthStart(options: {
     });
     const result = await auth(provider, { serverUrl: prepared.serverUrl });
     if (result === "AUTHORIZED") {
-      return [`OAuth authorization is available for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /mcp reconnect ${prepared.serverName}.`].join("\n");
+      return [`OAuth authorization is available for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`].join("\n");
     }
     const authorizationUrl = provider.authorizationUrl;
     if (!authorizationUrl) return `OAuth authorization started for "${prepared.serverName}", but no authorization URL was returned. Run auth-start again.`;
@@ -72,7 +72,7 @@ export async function executeAuthStart(options: {
       "After login, copy the full redirected URL and run:",
       `mcp({ action: "auth-complete", server: "${prepared.serverName}", args: "{\\\"redirectUrl\\\":\\\"<full redirected URL>\\\"}" })`,
       "",
-      `Then reconnect with mcp({ connect: "${prepared.serverName}" }) or /mcp reconnect ${prepared.serverName}.`,
+      `Then reconnect with mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`,
     ].join("\n");
   } catch (error) {
     return redactOAuthMessage(error);
@@ -128,7 +128,7 @@ async function executeClientCredentialsAuthStart(
         tokens,
       },
     });
-    return [`OAuth client_credentials token stored for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /mcp reconnect ${prepared.serverName}.`].join("\n");
+    return [`OAuth client_credentials token stored for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`].join("\n");
   } catch (error) {
     return redactOAuthMessage(error);
   }
@@ -176,7 +176,7 @@ export async function executeAuthComplete(options: {
     await auth(provider, { serverUrl: prepared.serverUrl, authorizationCode: parsedRedirect.code });
     const tokens = await provider.tokens();
     if (!tokens?.access_token) return `OAuth authorization did not return an access token for "${prepared.serverName}". Run auth-start again.`;
-    return [`OAuth authorization complete for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /mcp reconnect ${prepared.serverName}.`].join("\n");
+    return [`OAuth authorization complete for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`].join("\n");
   } catch (error) {
     return redactOAuthMessage(error);
   }

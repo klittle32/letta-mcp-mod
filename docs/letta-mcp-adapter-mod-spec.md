@@ -376,22 +376,22 @@ mcp({
 })
 ```
 
-### Slice 4: `/mcp` command and setup UX
+### Slice 4: `/lmcp` command and setup UX
 
 Goal: human-facing controls.
 
 Commands:
 
 ```text
-/mcp
-/mcp status
-/mcp tools
-/mcp reconnect
-/mcp reconnect <server>
-/mcp setup
+/lmcp
+/lmcp status
+/lmcp tools
+/lmcp reconnect
+/lmcp reconnect <server>
+/lmcp setup
 ```
 
-Initial `/mcp setup` should be simple and text-first:
+Initial `/lmcp setup` should be simple and text-first:
 
 - show discovered config paths
 - show which exist
@@ -400,16 +400,16 @@ Initial `/mcp setup` should be simple and text-first:
 
 Letta command behavior:
 
-- `letta.commands.register({ id: "mcp", ... })`
+- `letta.commands.register({ id: "lmcp", ... })`
 - Start with `{ type: "output", output }`.
 - If richer setup needs an agent workflow, return `{ type: "prompt", content }`.
 
 Acceptance examples:
 
 ```text
-/mcp
-/mcp tools
-/mcp reconnect filesystem
+/lmcp
+/lmcp tools
+/lmcp reconnect filesystem
 ```
 
 ### Slice 5: HTTP MCP servers + bearer auth
@@ -504,7 +504,7 @@ Features:
 Acceptance criteria:
 
 - Add `directTools`, run `/reload`, direct tools appear if cache exists.
-- If cache is missing, `mcp` says to run `/mcp reconnect <server>`.
+- If cache is missing, `mcp` says to run `/lmcp reconnect <server>`.
 
 ### Slice 8: Letta-specific permissions and safety
 
@@ -742,7 +742,8 @@ Implement:
 Manual smoke:
 
 1. build bundle
-2. copy or symlink to `~/.letta/mods/letta-mcp-adapter.mjs`
+2. copy to `~/.letta/mods/letta-mcp-adapter.mjs`
+   - Do not symlink the bundle: Letta Code's mod loader only lists regular files, so symlinked mods are ignored.
 3. run `/reload`
 4. ask agent to call `mcp({})`
 
@@ -819,14 +820,14 @@ Definition of done:
 
 - useful MVP
 
-### Cycle 8: `/mcp` commands
+### Cycle 8: `/lmcp` commands
 
 Tests:
 
 - command registration guarded by capabilities
-- `/mcp` status output
-- `/mcp tools`
-- `/mcp reconnect <server>`
+- `/lmcp` status output
+- `/lmcp tools`
+- `/lmcp reconnect <server>`
 - invalid subcommand gives help
 
 Implement:
@@ -836,9 +837,9 @@ Implement:
 Manual smoke:
 
 ```text
-/mcp
-/mcp tools
-/mcp reconnect filesystem
+/lmcp
+/lmcp tools
+/lmcp reconnect filesystem
 ```
 
 Definition of done:
@@ -920,7 +921,7 @@ Definition of done:
 4. Proxy status/search/describe
 5. Mod registration
 6. Stdio connect/call
-7. `/mcp` basic commands
+7. `/lmcp` basic commands
 
 Outcome: local MCP servers usable in Letta Code via `mcp`.
 

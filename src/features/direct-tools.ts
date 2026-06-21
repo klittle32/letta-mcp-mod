@@ -30,7 +30,7 @@ export function collectDirectToolDescriptors(state: ProxyState): DirectToolDescr
 
     if (!server.cacheEntry || !server.cacheValid) {
       const cacheState = server.cacheEntry ? "stale" : "missing";
-      warnings.push(`Direct tools for "${server.name}" are configured but metadata cache is ${cacheState}. Run /mcp reconnect ${server.name} then /reload.`);
+      warnings.push(`Direct tools for "${server.name}" are configured but metadata cache is ${cacheState}. Run /lmcp reconnect ${server.name} then /reload.`);
       continue;
     }
 

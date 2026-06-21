@@ -72,7 +72,7 @@ Constraints from the mod API and skill:
   - describe: `mcp({ describe: "tool_name" })`
 - Implement a Letta mod activation file that registers the `mcp` tool.
 - Bundle to `dist/letta-mcp-adapter.mjs`.
-- Optionally copy/symlink to `~/.letta/mods/letta-mcp-adapter.mjs` only when explicitly doing the local smoke test.
+- Optionally copy to `~/.letta/mods/letta-mcp-adapter.mjs` only when explicitly doing the local smoke test; do not symlink because Letta Code's mod loader ignores symlinked mod files.
 - Document how to smoke test with `/reload`.
 
 ### Out of scope
@@ -836,7 +836,7 @@ Only after automated checks pass.
 Actions:
 
 1. Ensure `~/.letta/mods` exists.
-2. Copy or symlink bundle:
+2. Copy the bundle; do not symlink it because Letta Code's mod loader ignores symlinked mod files:
 
 ```bash
 mkdir -p ~/.letta/mods
