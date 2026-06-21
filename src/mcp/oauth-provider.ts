@@ -63,7 +63,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
     this.home = options.home;
     this.now = options.now ?? Date.now;
     this.config = getOAuthConfig(options.definition);
-    if (!this.config.redirectUri) {
+    if (this.config.grantType !== "client_credentials" && !this.config.redirectUri) {
       throw new InvalidServerConfigError(`Server "${options.serverName}" OAuth authorization_code flow requires oauth.redirectUri.`);
     }
   }

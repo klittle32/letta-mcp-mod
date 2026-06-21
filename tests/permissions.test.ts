@@ -191,6 +191,15 @@ describe("MCP permission decisions for live proxy and OAuth operations", () => {
       reason: 'MCP OAuth action "auth-complete" may change authentication state.',
     });
   });
+
+  it("asks before clearing OAuth for a configured server", () => {
+    const state = stateWith({ mcpServers: { github: definition } });
+
+    expect(decideMcpPermission(permissionEvent({ action: "auth-clear", server: "github" }), state)).toEqual({
+      decision: "ask",
+      reason: 'MCP OAuth action "auth-clear" may change authentication state.',
+    });
+  });
 });
 
 describe("MCP permission decisions for proxy tool-call risk", () => {
@@ -529,7 +538,7 @@ describe("MCP permission overlay registration", () => {
   it("denies safely when loadState fails", async () => {
     const register = vi.fn<(permission: unknown) => () => void>(() => vi.fn());
     const runtime = fakeRuntime(state);
-    vi.mocked(runtime.loadState).mockImplementation(() => {
+    (runtime.loadState as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error("bad config");
     });
 
@@ -611,7 +620,7 @@ describe("MCP permission overlay registration", () => {
     const runtime = fakeRuntime(httpState);
     const originalFetch = globalThis.fetch;
     const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
+    globalThis.fetch = fetchSpy as never;
 
     try {
       registerMcpPermissions({ letta: { capabilities: { permissions: true }, permissions: { register } } as never, runtime });
@@ -625,7 +634,7 @@ describe("MCP permission overlay registration", () => {
       expect(runtime.connectAndRefresh).not.toHaveBeenCalled();
       expect(runtime.callTool).not.toHaveBeenCalled();
     } finally {
-      vi.stubGlobal("fetch", originalFetch);
+      globalThis.fetch = originalFetch;
     }
   });
 });

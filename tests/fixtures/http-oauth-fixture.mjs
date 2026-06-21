@@ -5,7 +5,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 const issuedCodes = new Set();
-const validAccessTokens = new Set(["fixture-access-token", "fixture-access-token-refreshed"]);
+const validAccessTokens = new Set(["fixture-access-token", "fixture-access-token-refreshed", "fixture-client-credentials-token"]);
 
 function json(res, status, value, headers = {}) {
   res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(value));
@@ -97,7 +97,7 @@ const httpServer = http.createServer(async (req, res) => {
       token_endpoint: `${origin}/token`,
       registration_endpoint: `${origin}/register`,
       response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code", "refresh_token"],
+      grant_types_supported: ["authorization_code", "refresh_token", "client_credentials"],
       token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
       code_challenge_methods_supported: ["S256"],
       scopes_supported: ["read", "write"],
@@ -151,6 +151,15 @@ const httpServer = http.createServer(async (req, res) => {
     }
     if (params.get("grant_type") === "refresh_token" && params.get("refresh_token") === "fixture-refresh-token") {
       json(res, 200, { access_token: "fixture-access-token-refreshed", token_type: "Bearer", expires_in: 3600 });
+      return;
+    }
+    if (params.get("grant_type") === "client_credentials") {
+      const { clientId, clientSecret } = parseClientAuth(req, params);
+      if (clientId !== "client-id" || clientSecret !== "client-secret-test-value") {
+        json(res, 401, { error: "invalid_client", error_description: "bad client credentials" });
+        return;
+      }
+      json(res, 200, { access_token: "fixture-client-credentials-token", token_type: "Bearer", expires_in: 3600, scope: params.get("scope") ?? undefined });
       return;
     }
     json(res, 400, { error: "unsupported_grant_type" });

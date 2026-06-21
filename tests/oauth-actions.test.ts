@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { executeOAuthAction } from "../src/features/oauth-actions.js";
-import { loadOAuthStore } from "../src/mcp/oauth-store.js";
+import { loadOAuthStore, saveOAuthStore } from "../src/mcp/oauth-store.js";
 import { startOAuthFixture } from "./helpers/oauth-fixture.js";
 
 function tempWorkspace() {
@@ -139,5 +139,97 @@ describe("OAuth actions", () => {
     } finally {
       await fixture.stop();
     }
+  });
+
+  it("auth-start supports client_credentials by fetching and storing a token", async () => {
+    const fixture = await startOAuthFixture();
+    const { home, cwd } = tempWorkspace();
+    try {
+      writeConfig(cwd, {
+        mcpServers: {
+          machine: {
+            url: fixture.url,
+            auth: "oauth",
+            oauth: {
+              grantType: "client_credentials",
+              clientId: "client-id",
+              clientSecret: "client-secret-test-value",
+              tokenUrl: `${fixture.origin}/token`,
+              scope: "read",
+            },
+          },
+        },
+      });
+      const runtime = createAdapterRuntime({ home, now: () => 123 });
+      const state = runtime.loadState({ cwd });
+
+      const output = await executeOAuthAction({ action: "auth-start", serverName: "machine", runtime, ctx: { cwd }, state });
+
+      expect(output).toContain('OAuth client_credentials token stored for "machine"');
+      expect(output).toContain('mcp({ connect: "machine" })');
+      expect(output).not.toContain("fixture-client-credentials-token");
+      expect(output).not.toContain("client-secret-test-value");
+      const store = loadOAuthStore({ home, serverName: "machine", serverUrl: fixture.url });
+      expect(store?.tokens).toMatchObject({ access_token: "fixture-client-credentials-token", token_type: "Bearer", scope: "read" });
+
+      const refreshed = await runtime.connectAndRefresh({ cwd }, "machine");
+      expect(refreshed.tools.map((tool) => tool.name)).toContain("echo");
+    } finally {
+      await fixture.stop();
+    }
+  });
+
+  it("client_credentials reports missing required configuration", async () => {
+    const { home, cwd } = tempWorkspace();
+    writeConfig(cwd, {
+      mcpServers: {
+        machine: { url: "http://127.0.0.1:1/mcp", auth: "oauth", oauth: { grantType: "client_credentials", clientId: "client-id" } },
+      },
+    });
+    const runtime = createAdapterRuntime({ home });
+    const state = runtime.loadState({ cwd });
+
+    await expect(executeOAuthAction({ action: "auth-start", serverName: "machine", runtime, ctx: { cwd }, state })).resolves.toContain("oauth.clientSecret");
+  });
+
+  it("auth-clear removes persisted OAuth credentials for a server", async () => {
+    const { home, cwd } = tempWorkspace();
+    writeConfig(cwd, {
+      mcpServers: {
+        linear: { url: "http://127.0.0.1:1/mcp", auth: "oauth", oauth: { clientId: "client-id", redirectUri: "http://127.0.0.1:3334/callback" } },
+      },
+    });
+    saveOAuthStore({
+      home,
+      serverName: "linear",
+      serverUrl: "http://127.0.0.1:1/mcp",
+      store: {
+        version: 1,
+        serverName: "linear",
+        serverUrl: "http://127.0.0.1:1/mcp",
+        updatedAt: 1,
+        state: "state-test-value",
+        authorizationUrl: "http://auth.example/authorize",
+        codeVerifier: "verifier-test-value",
+        clientInformation: { client_id: "client-id", client_secret: "client-secret-test-value" },
+        tokens: { access_token: "access-token-test-value", refresh_token: "refresh-token-test-value", token_type: "Bearer" },
+        discoveryState: { authorizationServerUrl: "http://auth.example" },
+      },
+    });
+    const runtime = createAdapterRuntime({ home });
+    const state = runtime.loadState({ cwd });
+
+    const output = await executeOAuthAction({ action: "auth-clear", serverName: "linear", runtime, ctx: { cwd }, state });
+
+    expect(output).toContain('OAuth credentials cleared for "linear"');
+    expect(output).not.toContain("access-token-test-value");
+    expect(output).not.toContain("client-secret-test-value");
+    const store = loadOAuthStore({ home, serverName: "linear", serverUrl: "http://127.0.0.1:1/mcp" });
+    expect(store?.state).toBeUndefined();
+    expect(store?.authorizationUrl).toBeUndefined();
+    expect(store?.codeVerifier).toBeUndefined();
+    expect(store?.clientInformation).toBeUndefined();
+    expect(store?.tokens).toBeUndefined();
+    expect(store?.discoveryState).toBeUndefined();
   });
 });

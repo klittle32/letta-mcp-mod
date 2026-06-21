@@ -71,7 +71,7 @@ export const MCP_PROXY_PARAMETERS = {
     },
     regex: {
       type: "boolean",
-      description: "Treat search as a regex. Regex search is deferred in this slice.",
+      description: "Treat search as a bounded JavaScript regex over cached tool names and descriptions.",
     },
     includeSchemas: {
       type: "boolean",
@@ -83,7 +83,7 @@ export const MCP_PROXY_PARAMETERS = {
     },
     action: {
       type: "string",
-      description: "Supported actions: auth-start, auth-complete, auth-status. Other actions are unsupported.",
+      description: "Supported actions: auth-start, auth-complete, auth-status, auth-clear. Other actions are unsupported.",
     },
   },
   additionalProperties: false,
@@ -182,30 +182,73 @@ export function executeListServer(state: ProxyState, serverName: string): string
 export function executeSearch(state: ProxyState, rawQuery: string, args: Pick<McpProxyArgs, "server" | "regex" | "includeSchemas"> = {}): string {
   const query = rawQuery.trim();
   if (!query) return "MCP search query is required.";
-  if (args.regex) return "Regex search is not implemented in Slice 1. Use a plain text query.";
+
+  const matcher = args.regex ? createRegexMatcher(query, state) : createPlainMatcher(query);
+  if (!matcher.ok) return matcher.message;
 
   const servers = args.server ? [state.servers.get(args.server)] : [...state.servers.values()];
   if (args.server && !servers[0]) return `Server "${args.server}" is not configured. Use mcp({}) to list configured servers.`;
 
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const matches: Array<{ server: ProxyServerState; tool: ToolMetadata }> = [];
   for (const server of servers) {
     if (!server) continue;
     for (const tool of server.tools) {
-      const haystack = `${tool.name} ${tool.description}`.toLowerCase();
-      if (terms.some((term) => haystack.includes(term))) matches.push({ server, tool });
+      const haystack = `${tool.name} ${tool.originalName} ${tool.description}`;
+      if (matcher.matches(haystack)) matches.push({ server, tool });
     }
   }
 
   if (matches.length === 0) return `No cached MCP tools matched "${query}".`;
 
   const includeSchemas = args.includeSchemas !== false;
-  const lines = [`${matches.length} cached MCP ${plural(matches.length, "tool")} matched "${query}":`];
+  const lines = [`${matches.length} cached MCP ${plural(matches.length, "tool")} matched ${args.regex ? "regex " : ""}"${query}":`];
   for (const match of matches) {
     lines.push("", `${match.tool.name} (${match.server.name})`, `  ${match.tool.description || "(no description)"}`);
+    if (match.tool.uiResourceUri) lines.push(`  UI resource: ${match.tool.uiResourceUri}`);
     if (includeSchemas) lines.push("  Parameters:", formatSchema(match.tool.inputSchema, "    "));
   }
   return lines.join("\n");
+}
+
+type SearchMatcher = { ok: true; matches(value: string): boolean } | { ok: false; message: string };
+
+function createPlainMatcher(query: string): SearchMatcher {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return { ok: true, matches: (value) => terms.some((term) => value.toLowerCase().includes(term)) };
+}
+
+function createRegexMatcher(query: string, state: ProxyState): SearchMatcher {
+  const maxLength = getRegexSearchMaxPatternLength(state);
+  if (query.length > maxLength) return { ok: false, message: `MCP regex search pattern is too long (${query.length} chars). Maximum is ${maxLength} chars.` };
+
+  const parsed = parseRegexQuery(query);
+  if (!parsed.ok) return parsed;
+
+  try {
+    const regex = new RegExp(parsed.pattern, parsed.flags);
+    return { ok: true, matches: (value) => { regex.lastIndex = 0; return regex.test(value); } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, message: `Invalid MCP regex search pattern: ${message}` };
+  }
+}
+
+function getRegexSearchMaxPatternLength(state: ProxyState): number {
+  const configured = state.config.settings?.regexSearch;
+  if (configured && typeof configured === "object" && !Array.isArray(configured) && typeof configured.maxPatternLength === "number" && configured.maxPatternLength > 0) {
+    return configured.maxPatternLength;
+  }
+  return 200;
+}
+
+function parseRegexQuery(query: string): { ok: true; pattern: string; flags: string } | { ok: false; message: string } {
+  if (!query.startsWith("/")) return { ok: true, pattern: query, flags: "i" };
+  const lastSlash = query.lastIndexOf("/");
+  if (lastSlash === 0) return { ok: true, pattern: query, flags: "i" };
+  const pattern = query.slice(1, lastSlash);
+  const flags = query.slice(lastSlash + 1);
+  if (!/^[dgimsuvy]*$/.test(flags)) return { ok: false, message: `Invalid MCP regex search flags "${flags}".` };
+  return { ok: true, pattern, flags };
 }
 
 export function executeDescribe(state: ProxyState, requestedName: string): string {
@@ -220,6 +263,7 @@ export function executeDescribe(state: ProxyState, requestedName: string): strin
       `Description: ${tool.description || "(no description)"}`,
     ];
     if (tool.resourceUri) lines.push(`Resource URI: ${tool.resourceUri}`);
+    if (tool.uiResourceUri) lines.push(`UI resource URI: ${tool.uiResourceUri}`);
     lines.push("Parameters:", formatSchema(tool.inputSchema, "  "));
     return lines.join("\n");
   }
@@ -227,7 +271,7 @@ export function executeDescribe(state: ProxyState, requestedName: string): strin
 }
 
 function executeUnsupportedAction(action: string): string {
-  return `Unsupported MCP action "${action}". Supported actions: auth-start, auth-complete, auth-status. This adapter also supports MCP tool calls plus connect, status, server listing from cache, search, and describe.`;
+  return `Unsupported MCP action "${action}". Supported actions: auth-start, auth-complete, auth-status, auth-clear. This adapter also supports MCP tool calls plus connect, status, server listing from cache, search, and describe.`;
 }
 
 function isOAuthAction(action: string): action is OAuthAction {
@@ -299,7 +343,8 @@ function executeConnectUnavailable(server: string): string {
 }
 
 function formatToolListItem(tool: ToolMetadata): string {
-  return `- ${tool.name} - ${tool.description || "(no description)"}`;
+  const ui = tool.uiResourceUri ? ` [UI resource: ${tool.uiResourceUri}]` : "";
+  return `- ${tool.name} - ${tool.description || "(no description)"}${ui}`;
 }
 
 function plural(count: number, singular: string): string {

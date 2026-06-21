@@ -2,6 +2,7 @@ import { createMcpCommand, type LettaCommandDefinition } from "./features/mcp-co
 import { registerCachedDirectTools } from "./features/direct-tools.js";
 import { registerMcpPermissions, type LettaPermissionEvent, type PermissionCheckResult } from "./features/permissions.js";
 import { executeMcpProxy, MCP_PROXY_PARAMETERS, type McpProxyArgs } from "./features/proxy-tool.js";
+import { registerMcpStatusValues } from "./features/status-values.js";
 import { createAdapterRuntime, type AdapterRuntime } from "./runtime.js";
 
 export interface LettaToolRunContext {
@@ -25,6 +26,7 @@ export interface LettaModApi {
     tools?: boolean;
     commands?: boolean;
     permissions?: boolean;
+    ui?: { statusValues?: boolean; panels?: boolean; [key: string]: unknown };
     [key: string]: unknown;
   };
   tools?: {
@@ -42,6 +44,11 @@ export interface LettaModApi {
   };
   diagnostics?: {
     report(message: unknown): void;
+  };
+  ui?: {
+    setStatus(id: string, value: string): void;
+    clearStatus(id: string): void;
+    openPanel?(options: { id: string; content: string | string[]; order?: number }): { update(options: { content: string | string[] }): void; close(): void };
   };
   [key: string]: unknown;
 }
@@ -78,13 +85,15 @@ export default function activate(
   const disposePermissions = registerMcpPermissions({ letta, runtime });
   if (disposePermissions) disposers.push(disposePermissions);
 
+  disposers.push(...registerMcpStatusValues({ letta, runtime, activationCwd }));
+
   if (letta.capabilities?.tools && letta.tools) {
     disposers.push(letta.tools.register(createMcpTool(runtime)));
     disposers.push(...registerCachedDirectTools({ letta, runtime, activationCwd }));
   }
 
   if (letta.capabilities?.commands && letta.commands) {
-    disposers.push(letta.commands.register(createMcpCommand(runtime)));
+    disposers.push(letta.commands.register(createMcpCommand(runtime, letta)));
   }
 
   return async () => {

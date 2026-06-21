@@ -56,6 +56,19 @@ describe("proxy tool modes", () => {
     expect(text).toContain("- filesystem_read_file - Read file");
   });
 
+  it("server list/search/describe surface UI resource URIs", () => {
+    const definition = { command: "npx" };
+    const cache = cacheFor("filesystem", definition, [{ name: "render_card", description: "Render card", uiResourceUri: "ui://card.html" }]);
+
+    const list = run({ server: "filesystem" }, { mcpServers: { filesystem: definition } }, cache);
+    const search = run({ search: "render", includeSchemas: false }, { mcpServers: { filesystem: definition } }, cache);
+    const describe = run({ describe: "filesystem_render_card" }, { mcpServers: { filesystem: definition } }, cache);
+
+    expect(list).toContain("[UI resource: ui://card.html]");
+    expect(search).toContain("UI resource: ui://card.html");
+    expect(describe).toContain("UI resource URI: ui://card.html");
+  });
+
   it("search rejects empty query", () => {
     expect(run({ search: "   " }, { mcpServers: {} })).toContain("search query is required");
   });
@@ -101,6 +114,38 @@ describe("proxy tool modes", () => {
     const text = run({ search: "read", includeSchemas: false }, { mcpServers: { filesystem: definition } }, cacheFor("filesystem", definition));
 
     expect(text).not.toContain("Parameters:");
+  });
+
+  it("regex search matches cached tool names and descriptions", () => {
+    const definition = { command: "npx" };
+    const cache = cacheFor("filesystem", definition, [
+      { name: "read_file", description: "Read file" },
+      { name: "list_directory", description: "Directory listing" },
+      { name: "write_file", description: "Create file" },
+    ]);
+
+    const text = run({ search: "^(filesystem_)?(read|list)_", regex: true, includeSchemas: false }, { mcpServers: { filesystem: definition } }, cache);
+
+    expect(text).toContain('matched regex "^(filesystem_)?(read|list)_"');
+    expect(text).toContain("filesystem_read_file");
+    expect(text).toContain("filesystem_list_directory");
+    expect(text).not.toContain("filesystem_write_file");
+  });
+
+  it("regex search supports slash-delimited ignore-case patterns", () => {
+    const definition = { command: "npx" };
+    const cache = cacheFor("filesystem", definition, [{ name: "read_file", description: "Read Important File" }]);
+
+    expect(run({ search: "/important file/i", regex: true, includeSchemas: false }, { mcpServers: { filesystem: definition } }, cache)).toContain("filesystem_read_file");
+  });
+
+  it("regex search rejects invalid, empty, and overlong patterns", () => {
+    const definition = { command: "npx" };
+    const config = { mcpServers: { filesystem: definition }, settings: { regexSearch: { maxPatternLength: 10 } } };
+
+    expect(run({ search: "(", regex: true }, config, cacheFor("filesystem", definition))).toContain("Invalid MCP regex search pattern");
+    expect(run({ search: "   ", regex: true }, config, cacheFor("filesystem", definition))).toContain("search query is required");
+    expect(run({ search: "a".repeat(11), regex: true }, config, cacheFor("filesystem", definition))).toContain("too long");
   });
 
   it("describe returns server, original name, description, and schema", () => {

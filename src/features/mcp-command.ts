@@ -42,6 +42,8 @@ export function parseMcpCommandArgs(rawArgs: string | undefined): ParsedMcpComma
       if (rest.length === 0) return { kind: "oauth", action: "auth-status" };
       if (rest.length === 1) return { kind: "oauth", action: "auth-status", serverName: rest[0] };
       return usageError("/mcp auth-status accepts at most one server name.");
+    case "auth-clear":
+      return rest.length === 1 ? { kind: "oauth", action: "auth-clear", serverName: rest[0] } : usageError("/mcp auth-clear requires exactly one server name.");
     case "setup":
       if (rest.length === 0) return { kind: "setup", create: false };
       if (rest.length === 1 && (rest[0] === "create" || rest[0] === "--write")) return { kind: "setup", create: true };
@@ -65,6 +67,7 @@ export function formatCommandHelp(): string {
     "- /mcp auth-start <server> — start OAuth login for one server",
     "- /mcp auth-complete <server> <redirectUrl> — finish OAuth login with the redirected URL",
     "- /mcp auth-status <server> — show OAuth token status for one server",
+    "- /mcp auth-clear <server> — clear stored OAuth credentials for one server",
     "- /mcp setup — show config paths and starter .mcp.json",
     "- /mcp setup create — create a starter project .mcp.json if missing",
   ].join("\n");
@@ -87,6 +90,7 @@ export function formatStatusCommand(state: ProxyState): string {
     "- /mcp reconnect <server> — reconnect and refresh one server",
     "- /mcp auth-start <server> — start OAuth login for one server",
     "- /mcp auth-complete <server> <redirectUrl> — finish OAuth login",
+    "- /mcp auth-clear <server> — clear stored OAuth credentials",
     "- /mcp setup — show config paths and starter .mcp.json",
   ].join("\n");
 }
@@ -117,7 +121,8 @@ export function formatToolsCommand(state: ProxyState): string {
   for (const server of serversWithTools) {
     lines.push("", `${server.name}:`);
     for (const tool of server.tools) {
-      lines.push(`- ${tool.name} — ${tool.description || "(no description)"}`);
+      const ui = tool.uiResourceUri ? ` [UI resource: ${tool.uiResourceUri}]` : "";
+      lines.push(`- ${tool.name} — ${tool.description || "(no description)"}${ui}`);
     }
   }
   return lines.join("\n");
@@ -283,17 +288,34 @@ export interface LettaCommandDefinition {
   run(ctx: McpCommandContext): Promise<LettaCommandResult> | LettaCommandResult;
 }
 
-export function createMcpCommand(runtime: AdapterRuntime = createAdapterRuntime()): LettaCommandDefinition {
+export interface McpCommandUi {
+  capabilities?: { ui?: { panels?: boolean; [key: string]: unknown }; [key: string]: unknown };
+  ui?: { openPanel?(options: { id: string; content: string | string[]; order?: number }): { update(options: { content: string | string[] }): void; close(): void } };
+}
+
+export function createMcpCommand(runtime: AdapterRuntime = createAdapterRuntime(), ui?: McpCommandUi): LettaCommandDefinition {
   return {
     id: "mcp",
     description: "Show MCP adapter status, list cached tools, reconnect servers, manage OAuth login, and display setup guidance.",
-    args: "[status|tools|reconnect [server]|auth-start <server>|auth-complete <server> <redirectUrl>|auth-status [server]|setup [create|--write]|help]",
+    args: "[status|tools|reconnect [server]|auth-start <server>|auth-complete <server> <redirectUrl>|auth-status [server]|auth-clear <server>|setup [create|--write]|help]",
     async run(ctx) {
       if (ctx.signal?.aborted) return { type: "output", output: "MCP command cancelled." };
-      const output = await executeMcpCommand(ctx.args, runtime, ctx);
-      return { type: "output", output };
+      const panel = openMcpCommandPanel(ui, ctx.args);
+      try {
+        const output = await executeMcpCommand(ctx.args, runtime, ctx);
+        panel?.update({ content: ["MCP command complete."] });
+        return { type: "output", output };
+      } finally {
+        panel?.close();
+      }
     },
   };
+}
+
+function openMcpCommandPanel(ui: McpCommandUi | undefined, args: string | undefined): { update(options: { content: string | string[] }): void; close(): void } | undefined {
+  if (!ui?.capabilities?.ui?.panels || !ui.ui?.openPanel) return undefined;
+  const label = args?.trim() ? `/mcp ${args.trim()}` : "/mcp status";
+  return ui.ui.openPanel({ id: "letta-mcp-command", content: [`Running ${label}...`], order: 100 });
 }
 
 export async function executeMcpCommand(rawArgs: string | undefined, runtime: AdapterRuntime, ctx: McpCommandContext): Promise<string> {

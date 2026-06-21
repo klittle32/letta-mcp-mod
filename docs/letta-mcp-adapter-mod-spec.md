@@ -14,7 +14,7 @@ mcp({
   connect?: string,
   tool?: string,
   args?: string,
-  action?: "auth-start" | "auth-complete" | "ui-messages"
+  action?: "auth-start" | "auth-complete" | "auth-status" | "auth-clear"
 })
 ```
 
@@ -50,6 +50,7 @@ The mod should follow `pi-mcp-adapter` semantics where they make sense:
 - Direct tools are opt-in and registered from cache only.
 - Tool names default to server-prefixed names.
 - Search/list/describe can work from cached metadata.
+- Regex search is supported against cached metadata only, with bounded patterns.
 
 ## Proposed File Layout
 
@@ -180,6 +181,18 @@ interface ServerEntry {
   excludeTools?: string[];
   debug?: boolean;
 }
+
+interface OAuthConfig {
+  grantType?: "authorization_code" | "client_credentials";
+  clientId?: string;
+  clientSecret?: string;
+  tokenUrl?: string;
+  audience?: string;
+  scope?: string;
+  redirectUri?: string;
+  clientName?: string;
+  clientUri?: string;
+}
 ```
 
 ### Settings
@@ -192,6 +205,25 @@ interface McpSettings {
   disableProxyTool?: boolean;
   autoAuth?: boolean;
   authRequiredMessage?: string;
+  regexSearch?: boolean | { maxPatternLength?: number };
+  ui?: {
+    status?: boolean;
+    panels?: boolean;
+    panelTTLms?: number;
+  };
+  sampling?: {
+    enabled?: boolean;
+    mode?: "disabled" | "summary-only" | "conversation-fork";
+    alwaysAsk?: boolean;
+    maxPromptChars?: number;
+  };
+  elicitation?: {
+    enabled?: boolean;
+    form?: boolean;
+    url?: boolean;
+    alwaysAsk?: boolean;
+    timeoutMs?: number;
+  };
   approval?: {
     dangerousTools?: "allow" | "ask" | "alwaysAsk" | "deny";
     unknownServers?: "allow" | "ask" | "alwaysAsk" | "deny";
@@ -199,6 +231,8 @@ interface McpSettings {
   };
 }
 ```
+
+Sampling and elicitation settings are reserved but intentionally not advertised to MCP servers yet. The current adapter keeps MCP clients long-lived in the manager and request handlers there do not have a safe scoped Letta conversation/form input API. Until the mod API can provide per-call conversation/fork or form-input context to MCP client request handlers, the adapter must not advertise `sampling` or `elicitation` capabilities.
 
 ### Cache
 
@@ -533,7 +567,7 @@ The proxy tool should use a small object schema:
     },
     regex: {
       type: "boolean",
-      description: "Treat search as regex"
+      description: "Treat search as a bounded JavaScript regex against cached metadata"
     },
     includeSchemas: {
       type: "boolean",
@@ -545,7 +579,7 @@ The proxy tool should use a small object schema:
     },
     action: {
       type: "string",
-      description: "Action: ui-messages, auth-start, or auth-complete"
+      description: "Action: auth-start, auth-complete, auth-status, or auth-clear"
     }
   },
   additionalProperties: false
@@ -907,7 +941,8 @@ Outcome: strong day-to-day MCP adapter.
 2. Setup wizard
 3. UI panels/status
 4. MCP UI resource handling
-5. Sampling/elicitation if Letta mod APIs support it cleanly
+5. Regex search, auth-clear, and client-credentials OAuth
+6. Sampling/elicitation only if Letta mod APIs support safe scoped handlers
 
 Outcome: closer parity with `pi-mcp-adapter`.
 

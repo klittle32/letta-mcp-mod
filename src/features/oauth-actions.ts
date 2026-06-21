@@ -1,9 +1,10 @@
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
+import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AdapterRuntime, RuntimeToolContext } from "../runtime.js";
 import { InvalidServerConfigError } from "../mcp/errors.js";
 import { resolveHttpUrl } from "../mcp/http.js";
 import { createOAuthProvider, isOAuthEnabled, parseOAuthRedirectUrl } from "../mcp/oauth-provider.js";
-import { loadOAuthStore, redactOAuthMessage } from "../mcp/oauth-store.js";
+import { clearOAuthCredentials, loadOAuthStore, redactOAuthMessage, saveOAuthStore } from "../mcp/oauth-store.js";
 import type { ProxyState } from "./proxy-tool.js";
 
 export type OAuthAction = "auth-start" | "auth-complete" | "auth-status" | "auth-clear";
@@ -24,8 +25,19 @@ export async function executeOAuthAction(options: {
     case "auth-status":
       return executeAuthStatus(options);
     case "auth-clear":
-      return "OAuth auth-clear is not implemented in Slice 6.";
+      return executeAuthClear(options);
   }
+}
+
+function executeAuthClear(options: { serverName: string | undefined; state: ProxyState }): string {
+  const prepared = prepareOAuthServer(options.state, options.serverName);
+  if (!prepared.ok) return prepared.message;
+  clearOAuthCredentials({ home: options.state.home, serverName: prepared.serverName, serverUrl: prepared.serverUrl.toString(), scope: "all" });
+  return [
+    `OAuth credentials cleared for "${prepared.serverName}".`,
+    "",
+    `Run mcp({ action: "auth-start", server: "${prepared.serverName}" }) to start a new login if needed.`,
+  ].join("\n");
 }
 
 export async function executeAuthStart(options: {
@@ -36,6 +48,7 @@ export async function executeAuthStart(options: {
 }): Promise<string> {
   const prepared = prepareOAuthServer(options.state, options.serverName);
   if (!prepared.ok) return prepared.message;
+  if (getOAuthGrantType(prepared.definition) === "client_credentials") return executeClientCredentialsAuthStart(prepared, options.state);
 
   try {
     const provider = createOAuthProvider({
@@ -64,6 +77,77 @@ export async function executeAuthStart(options: {
   } catch (error) {
     return redactOAuthMessage(error);
   }
+}
+
+async function executeClientCredentialsAuthStart(
+  prepared: { serverName: string; definition: NonNullable<ReturnType<ProxyState["servers"]["get"]>>["definition"]; serverUrl: URL },
+  state: ProxyState,
+): Promise<string> {
+  const config = getOAuthConfig(prepared.definition);
+  if (!config.clientId) return `Server "${prepared.serverName}" OAuth client_credentials flow requires oauth.clientId.`;
+  if (!config.clientSecret) return `Server "${prepared.serverName}" OAuth client_credentials flow requires oauth.clientSecret.`;
+  if (!config.tokenUrl) return `Server "${prepared.serverName}" OAuth client_credentials flow requires oauth.tokenUrl.`;
+
+  let tokenUrl: URL;
+  try {
+    tokenUrl = new URL(config.tokenUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Server "${prepared.serverName}" has invalid oauth.tokenUrl: ${message}`;
+  }
+
+  const body = new URLSearchParams({ grant_type: "client_credentials", client_id: config.clientId, client_secret: config.clientSecret });
+  if (config.scope) body.set("scope", config.scope);
+  if (config.audience) body.set("audience", config.audience);
+
+  try {
+    const response = await fetch(tokenUrl, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      body,
+    });
+    const payload = await safeReadJson(response);
+    if (!response.ok) {
+      const detail = summarizeOAuthTokenError(payload, response.status);
+      return redactOAuthMessage(`OAuth client_credentials token request failed for "${prepared.serverName}": ${detail}.`);
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.access_token !== "string" || !payload.access_token) {
+      return `OAuth client_credentials token response for "${prepared.serverName}" did not include an access token.`;
+    }
+    const tokens = payload as OAuthTokens;
+    saveOAuthStore({
+      home: state.home,
+      serverName: prepared.serverName,
+      serverUrl: prepared.serverUrl.toString(),
+      store: {
+        version: 1,
+        serverName: prepared.serverName,
+        serverUrl: prepared.serverUrl.toString(),
+        updatedAt: Date.now(),
+        clientInformation: { client_id: config.clientId, client_secret: config.clientSecret },
+        tokens,
+      },
+    });
+    return [`OAuth client_credentials token stored for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /mcp reconnect ${prepared.serverName}.`].join("\n");
+  } catch (error) {
+    return redactOAuthMessage(error);
+  }
+}
+
+async function safeReadJson(response: Response): Promise<Record<string, unknown> | undefined> {
+  try {
+    const value = await response.json();
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizeOAuthTokenError(payload: Record<string, unknown> | undefined, status: number): string {
+  if (!payload) return `HTTP ${status}`;
+  const error = typeof payload.error === "string" ? payload.error : `HTTP ${status}`;
+  const description = typeof payload.error_description === "string" ? payload.error_description : undefined;
+  return description ? `${error} (${description})` : error;
 }
 
 export async function executeAuthComplete(options: {
@@ -120,13 +204,21 @@ function prepareOAuthServer(
   const server = state.servers.get(serverName);
   if (!server) return { ok: false, message: `Server "${serverName}" is not configured. Use mcp({}) to list configured servers.` };
   if (!server.definition.url) return { ok: false, message: `Server "${serverName}" requires an HTTP URL for OAuth authentication.` };
-  if (!isOAuthEnabled(server.definition)) return { ok: false, message: `OAuth is not configured for server "${serverName}". Set auth: "oauth" and oauth.redirectUri in .mcp.json.` };
+  if (!isOAuthEnabled(server.definition)) return { ok: false, message: `OAuth is not configured for server "${serverName}". Set auth: "oauth" and oauth settings in .mcp.json.` };
   try {
     return { ok: true, serverName, definition: server.definition, serverUrl: resolveHttpUrl(serverName, server.definition) };
   } catch (error) {
     if (error instanceof InvalidServerConfigError) return { ok: false, message: error.message };
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function getOAuthConfig(definition: { oauth?: unknown }): { grantType?: string; clientId?: string; clientSecret?: string; tokenUrl?: string; scope?: string; audience?: string } {
+  return definition.oauth && typeof definition.oauth === "object" && !Array.isArray(definition.oauth) ? definition.oauth as Record<string, string | undefined> : {};
+}
+
+function getOAuthGrantType(definition: { oauth?: unknown }): string {
+  return getOAuthConfig(definition).grantType ?? "authorization_code";
 }
 
 function parseAuthCompleteArgs(rawArgs: string | undefined):

@@ -5,7 +5,7 @@ import type { AdapterRuntime } from "../src/runtime.js";
 import { computeServerHash, type MetadataCache } from "../src/core/cache.js";
 import type { ServerEntry } from "../src/core/config.js";
 
-function createFakeLetta(capabilities: { tools?: boolean; commands?: boolean; permissions?: boolean } = { tools: true, commands: false }) {
+function createFakeLetta(capabilities: { tools?: boolean; commands?: boolean; permissions?: boolean; ui?: { statusValues?: boolean } } = { tools: true, commands: false }) {
   const registeredTools: unknown[] = [];
   const registeredCommands: unknown[] = [];
   const registeredPermissions: unknown[] = [];
@@ -32,6 +32,10 @@ function createFakeLetta(capabilities: { tools?: boolean; commands?: boolean; pe
         registeredPermissions.push(permission);
         return permissionDisposer;
       },
+    },
+    ui: {
+      setStatus: vi.fn(),
+      clearStatus: vi.fn(),
     },
     diagnostics: { report: vi.fn() },
   } satisfies LettaModApi & { registeredTools?: unknown[] };
@@ -126,6 +130,25 @@ describe("Letta mod registration", () => {
 
     expect(registeredTools).toHaveLength(1);
     expect(registeredCommands).toHaveLength(1);
+  });
+
+  it("registers and clears MCP UI status values when available", async () => {
+    const { letta } = createFakeLetta({ tools: false, commands: false, ui: { statusValues: true } });
+    const runtime = createFakeRuntime(directState());
+
+    const dispose = activate(letta, runtime, { activationCwd: "/tmp/activation" });
+
+    expect(letta.ui?.setStatus).toHaveBeenCalledWith("mcp", "1 server, 1 tool");
+    await dispose?.();
+    expect(letta.ui?.clearStatus).toHaveBeenCalledWith("mcp");
+  });
+
+  it("does not register UI status values when the capability is unavailable", () => {
+    const { letta } = createFakeLetta({ tools: false, commands: false });
+
+    activate(letta, createFakeRuntime(directState()), { activationCwd: "/tmp/activation" });
+
+    expect(letta.ui?.setStatus).not.toHaveBeenCalled();
   });
 
   it("registers cache-backed direct tools after the compact proxy tool using activation cwd", () => {

@@ -16,6 +16,8 @@ export interface OAuthConfig {
   grantType?: "authorization_code" | "client_credentials";
   clientId?: string;
   clientSecret?: string;
+  tokenUrl?: string;
+  audience?: string;
   scope?: string;
   redirectUri?: string;
   clientName?: string;
@@ -50,6 +52,10 @@ export interface McpSettings {
   disableProxyTool?: boolean;
   autoAuth?: boolean;
   authRequiredMessage?: string;
+  regexSearch?: boolean | { maxPatternLength?: number };
+  ui?: { status?: boolean; panels?: boolean; panelTTLms?: number };
+  sampling?: { enabled?: boolean; mode?: "disabled" | "summary-only" | "conversation-fork"; alwaysAsk?: boolean; maxPromptChars?: number };
+  elicitation?: { enabled?: boolean; form?: boolean; url?: boolean; alwaysAsk?: boolean; timeoutMs?: number };
   approval?: McpApprovalSettings;
   [key: string]: unknown;
 }
@@ -186,6 +192,8 @@ function normalizeOAuthConfig(oauth: OAuthConfig, env: Record<string, string | u
     ...oauth,
     clientId: oauth.clientId !== undefined ? interpolateEnvVars(oauth.clientId, env) : undefined,
     clientSecret: oauth.clientSecret !== undefined ? interpolateEnvVars(oauth.clientSecret, env) : undefined,
+    tokenUrl: oauth.tokenUrl !== undefined ? interpolateEnvVars(oauth.tokenUrl, env) : undefined,
+    audience: oauth.audience !== undefined ? interpolateEnvVars(oauth.audience, env) : undefined,
     scope: oauth.scope !== undefined ? interpolateEnvVars(oauth.scope, env) : undefined,
     redirectUri: oauth.redirectUri !== undefined ? interpolateEnvVars(oauth.redirectUri, env) : undefined,
     clientName: oauth.clientName !== undefined ? interpolateEnvVars(oauth.clientName, env) : undefined,

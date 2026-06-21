@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { formatCommandHelp, parseMcpCommandArgs } from "../src/features/mcp-command.js";
 
 describe("parseMcpCommandArgs", () => {
@@ -28,6 +28,7 @@ describe("parseMcpCommandArgs", () => {
     expect(parseMcpCommandArgs("auth-start remote")).toEqual({ kind: "oauth", action: "auth-start", serverName: "remote" });
     expect(parseMcpCommandArgs("auth-status remote")).toEqual({ kind: "oauth", action: "auth-status", serverName: "remote" });
     expect(parseMcpCommandArgs("auth-status")).toEqual({ kind: "oauth", action: "auth-status" });
+    expect(parseMcpCommandArgs("auth-clear remote")).toEqual({ kind: "oauth", action: "auth-clear", serverName: "remote" });
     expect(parseMcpCommandArgs("auth-complete remote http://127.0.0.1/callback?code=a b&state=s")).toEqual({
       kind: "oauth",
       action: "auth-complete",
@@ -82,6 +83,7 @@ describe("formatCommandHelp", () => {
     expect(help).toContain("/mcp reconnect <server>");
     expect(help).toContain("/mcp auth-start <server>");
     expect(help).toContain("/mcp auth-complete <server> <redirectUrl>");
+    expect(help).toContain("/mcp auth-clear <server>");
     expect(help).toContain("/mcp setup");
     expect(help).toContain("/mcp setup create");
   });
@@ -112,7 +114,7 @@ function cachedFixtureState(): ProxyState {
     now: 1_000,
     tools: [
       { name: "echo", description: "Echo a message", inputSchema: { type: "object", properties: { message: { type: "string" } } } },
-      { name: "list_items", description: "List fixture items", inputSchema: { type: "object", properties: {} } },
+      { name: "list_items", description: "List fixture items", inputSchema: { type: "object", properties: {} }, uiResourceUri: "ui://fixture/list.html" },
     ],
     resources: [{ uri: "fixture://readme", name: "Fixture README", description: "Read resource: fixture://readme" }],
   });
@@ -165,7 +167,7 @@ describe("formatToolsCommand", () => {
     expect(text).toContain("Cached MCP tools");
     expect(text).toContain("fixture:");
     expect(text).toContain("- fixture_echo — Echo a message");
-    expect(text).toContain("- fixture_list_items — List fixture items");
+    expect(text).toContain("- fixture_list_items — List fixture items [UI resource: ui://fixture/list.html]");
   });
 
   it("resource-backed synthetic tools are included", () => {
@@ -523,6 +525,25 @@ describe("createMcpCommand", () => {
 
       expect(result.type).toBe("output");
       expect(result.output).toContain("MCP Adapter");
+    } finally {
+      await runtime.closeAll();
+    }
+  });
+
+  it("run(ctx) opens, updates, and closes a panel when panel UI is available", async () => {
+    const { home, cwd } = tempCommandWorkspace();
+    const runtime = createAdapterRuntime({ home });
+    const panel = { update: vi.fn(), close: vi.fn() };
+    const ui = { capabilities: { ui: { panels: true } }, ui: { openPanel: vi.fn(() => panel) } };
+    try {
+      const command = createMcpCommand(runtime, ui);
+
+      const result = await command.run({ cwd, args: "status" });
+
+      expect(result.output).toContain("MCP Adapter");
+      expect(ui.ui.openPanel).toHaveBeenCalledWith({ id: "letta-mcp-command", content: ["Running /mcp status..."], order: 100 });
+      expect(panel.update).toHaveBeenCalledWith({ content: ["MCP command complete."] });
+      expect(panel.close).toHaveBeenCalledTimes(1);
     } finally {
       await runtime.closeAll();
     }
