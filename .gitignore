@@ -1,0 +1,16 @@
+# Letta local project settings
+.letta/
+
+# Dependencies and build outputs
+node_modules/
+dist/
+coverage/
+
+# Local environment/secrets
+.env
+.env.*
+!.env.example
+
+# Logs and local OS/editor files
+*.log
+.DS_Store
