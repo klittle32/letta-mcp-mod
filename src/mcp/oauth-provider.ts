@@ -91,7 +91,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
         redirect_uris: [],
         grant_types: ["client_credentials"],
         application_type: "native",
-        client_name: this.config.clientName ?? "Letta MCP Adapter",
+        client_name: this.config.clientName ?? "Letta Toolbox",
       };
       if (this.config.clientUri) metadata.client_uri = this.config.clientUri;
       if (this.config.scope) metadata.scope = this.config.scope;
@@ -102,7 +102,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       application_type: "native",
-      client_name: this.config.clientName ?? "Letta MCP Adapter",
+      client_name: this.config.clientName ?? "Letta Toolbox",
     };
     if (this.config.clientUri) metadata.client_uri = this.config.clientUri;
     if (this.config.scope) metadata.scope = this.config.scope;

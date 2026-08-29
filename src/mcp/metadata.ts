@@ -39,7 +39,7 @@ export function normalizeTools(
     if (!tool.name) return false;
     if (tool.annotations === undefined) return true;
     if (isValidToolAnnotations(tool.annotations)) return true;
-    warnings.push(`Dropped MCP tool "${tool.name}" because its annotations are invalid.`);
+    warnings.push(`Dropped external tool "${tool.name}" because its annotations are invalid.`);
     return false;
   }).map((tool) => {
     const cached: CachedTool = { name: tool.name };

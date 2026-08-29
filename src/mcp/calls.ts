@@ -18,14 +18,14 @@ export type ToolTargetResolution =
 export function resolveToolTarget(state: ProxyState, options: { toolName: string; serverName?: string }): ToolTargetResolution {
   const requestedName = options.toolName.trim();
   if (!requestedName) {
-    return { ok: false, kind: "invalid_tool", message: "MCP tool name is required." };
+    return { ok: false, kind: "invalid_tool", message: "External tool name is required." };
   }
 
   if (options.serverName && !state.servers.has(options.serverName)) {
     return {
       ok: false,
       kind: "unknown_server",
-      message: `Server "${options.serverName}" is not configured. Use /lmcp status to list configured servers.`,
+      message: `Server "${options.serverName}" is not configured. Use /toolbox status to list configured servers.`,
     };
   }
 

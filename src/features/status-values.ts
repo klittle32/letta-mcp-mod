@@ -13,13 +13,13 @@ export function registerMcpStatusValues(options: { letta: LettaModApi; runtime: 
   try {
     const state = runtime.loadState({ cwd: activationCwd });
     if (state.config.settings?.ui?.status === false) return [];
-    letta.ui.setStatus("mcp", formatMcpStatusText(state));
+    letta.ui.setStatus("toolbox", formatMcpStatusText(state));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    letta.ui.setStatus("mcp", `error: ${message}`);
+    letta.ui.setStatus("toolbox", `error: ${message}`);
   }
 
-  return [() => letta.ui?.clearStatus("mcp")];
+  return [() => letta.ui?.clearStatus("toolbox")];
 }
 
 function formatMcpStatusText(state: ReturnType<AdapterRuntime["loadState"]>): string {

@@ -44,7 +44,7 @@ native `.node` binary and cannot be embedded in the adapter's single JavaScript
 bundle. The installed Letta Code 0.31.5 mod documentation supports direct mod
 files and advises them not to assume third-party packages; it does not document
 a package-based mod installation format. Its command API also does not expose a
-host secret resolver that `/lmcp auth-*` and background HTTP connections can
+host secret resolver that `/toolbox auth-*` and background HTTP connections can
 share.
 
 Therefore this milestone will not pretend that a mode-0600 JSON file is an OS
@@ -65,7 +65,7 @@ must state the storage limitation plainly.
 
 ### Authorization completion
 
-- `/lmcp auth-complete` requires the complete redirected URL.
+- `/toolbox auth-complete` requires the complete redirected URL.
 - Parse and pass both `code` and `iss` to SDK 2 `auth()`.
 - Preserve the adapter's state check and let the SDK validate `iss` against
   discovered authorization-server metadata.

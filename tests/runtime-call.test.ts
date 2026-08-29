@@ -122,7 +122,7 @@ describe("adapter runtime callTool", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.isError).toBe(true);
-      expect(result.output).toBe('MCP tool "fixture_fail_soft" on "fixture" returned an error.\n\nfixture failure');
+      expect(result.output).toBe('External tool "fixture_fail_soft" on "fixture" returned an error.\n\nfixture failure');
     }
     await runtime.closeAll();
   });
@@ -135,7 +135,7 @@ describe("adapter runtime callTool", () => {
     const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_throw_error", {});
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.message).toContain('Failed to call MCP tool "fixture_throw_error" on "fixture"');
+    if (!result.ok) expect(result.message).toContain('Failed to call external tool "fixture_throw_error" on "fixture"');
     await runtime.closeAll();
   });
 
@@ -214,7 +214,7 @@ describe("adapter runtime callTool", () => {
 
     const result = await runtime.callTool({ cwd, signal: controller.signal }, runtime.loadState({ cwd }), "fixture_echo", { message: "hello" });
 
-    expect(result).toEqual({ ok: false, message: "MCP request cancelled." });
+    expect(result).toEqual({ ok: false, message: "External tool request cancelled." });
     expect(runtime.manager.getConnection("fixture")).toBeUndefined();
   });
 

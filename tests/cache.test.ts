@@ -273,7 +273,7 @@ describe("metadata cache", () => {
       tools: [],
       resources: [],
       cacheScope: "public",
-      warnings: ['Server "fixture": Dropped MCP tool "invalid" because its annotations are invalid.'],
+      warnings: ['Server "fixture": Dropped external tool "invalid" because its annotations are invalid.'],
       now: 1_000,
     });
 
@@ -283,7 +283,7 @@ describe("metadata cache", () => {
       now: 1_000,
     });
     expect(state.warnings).toEqual([
-      'Server "fixture": Dropped MCP tool "invalid" because its annotations are invalid.',
+      'Server "fixture": Dropped external tool "invalid" because its annotations are invalid.',
     ]);
   });
 

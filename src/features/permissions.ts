@@ -75,7 +75,7 @@ export function normalizeApprovalSettings(settings: unknown): NormalizedApproval
       approval[key] = value;
       continue;
     }
-    warnings.push(`Invalid MCP approval setting "${key}": expected allow, ask, alwaysAsk, or deny.`);
+    warnings.push(`Invalid Toolbox approval setting "${key}": expected allow, ask, alwaysAsk, or deny.`);
   }
 
   return { approval, warnings };
@@ -119,14 +119,14 @@ export function registerMcpPermissions(options: {
     ? options.directToolNames
     : options.directToolNames ? new Set(options.directToolNames) : undefined;
   return letta.permissions.register({
-    id: "letta-mcp-adapter-permissions",
-    description: "Apply MCP adapter safety policy to catalog and direct MCP tool calls.",
+    id: "letta-toolbox-permissions",
+    description: "Apply Toolbox safety policy to catalog and direct external tool calls.",
     async check(event) {
       try {
         const state = runtime.loadState({ cwd: event.cwd });
         return decideMcpPermission(event, state, { tracker, directToolNames });
       } catch (error) {
-        return { decision: "deny", reason: `MCP permission check failed: ${error instanceof Error ? error.message : String(error)}` };
+        return { decision: "deny", reason: `Toolbox permission check failed: ${error instanceof Error ? error.message : String(error)}` };
       }
     },
   });
@@ -161,9 +161,9 @@ function applyApprovalTracking(
 
   if (event.phase === "execution") {
     if (tracker.consume(event, fingerprint)) {
-      return { decision: "allow", reason: "Risky MCP call was approved before execution." };
+      return { decision: "allow", reason: "Risky external tool call was approved before execution." };
     }
-    return { decision: "deny", reason: "Risky MCP call reached execution without a matching prior approval." };
+    return { decision: "deny", reason: "Risky external tool call reached execution without a matching prior approval." };
   }
 
   return result;
@@ -197,7 +197,7 @@ function decideDirectToolCall(
   const descriptor = collectDirectToolDescriptors(state).descriptors.find((candidate) => candidate.name === event.toolName);
   if (!descriptor) {
     if (context.directToolNames && new Set(context.directToolNames).has(event.toolName)) {
-      return { decision: "deny", reason: `MCP direct tool "${event.toolName}" is no longer present in current cached metadata.` };
+      return { decision: "deny", reason: `External direct tool "${event.toolName}" is no longer present in current cached metadata.` };
     }
     return undefined;
   }
@@ -230,9 +230,9 @@ function decideCallTool(
     const serverHint = inferConfiguredServer(state, toolName);
     if (!serverHint) return { decision: resolution.decision ?? "deny", reason: resolution.reason };
     if (isDangerousToolName(toolName) || hasPathOutsideWorkingDirectory(toolArgs, event.cwd || event.workingDirectory)) {
-      return { decision: approval.dangerousTools, reason: `Uncached MCP tool "${toolName}" is potentially dangerous.` };
+      return { decision: approval.dangerousTools, reason: `Uncached external tool "${toolName}" is potentially dangerous.` };
     }
-    return { decision: "ask", reason: `MCP tool "${toolName}" needs a metadata refresh from configured server "${serverHint}" before execution.` };
+    return { decision: "ask", reason: `External tool "${toolName}" needs a metadata refresh from configured server "${serverHint}" before execution.` };
   }
 
   return decideResolvedTool({
@@ -257,7 +257,7 @@ function decideResolvedTool(options: {
   annotations?: ToolMetadata["annotations"];
   dangerousName: boolean;
 }): PermissionCheckResult {
-  const label = `MCP ${options.kind} "${options.displayName}"`;
+  const label = `External ${options.kind} "${options.displayName}"`;
   const candidates: PermissionCheckResult[] = [];
   if (hasPathOutsideWorkingDirectory(options.args, options.cwd)) {
     candidates.push({
@@ -323,8 +323,8 @@ function resolveCachedTool(state: ProxyState, toolName: string): ToolResolution 
     if (tool) matches.push({ serverName: server.name, tool });
   }
   if (matches.length === 1) return { ok: true, ...matches[0] };
-  if (matches.length > 1) return { ok: false, reason: `MCP tool "${toolName}" matched multiple cached servers; provide a server hint.` };
-  return { ok: false, reason: `MCP tool "${toolName}" was not found in cached metadata.` };
+  if (matches.length > 1) return { ok: false, reason: `External tool "${toolName}" matched multiple cached servers; provide a server hint.` };
+  return { ok: false, reason: `External tool "${toolName}" was not found in cached metadata.` };
 }
 
 function inferConfiguredServer(state: ProxyState, toolName: string): string | undefined {

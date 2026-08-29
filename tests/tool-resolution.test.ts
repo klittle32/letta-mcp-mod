@@ -79,7 +79,7 @@ describe("tool target resolution", () => {
     expect(resolveToolTarget(stateWithCache(), { toolName: "echo", serverName: "missing" })).toEqual({
       ok: false,
       kind: "unknown_server",
-      message: 'Server "missing" is not configured. Use /lmcp status to list configured servers.',
+      message: 'Server "missing" is not configured. Use /toolbox status to list configured servers.',
     });
   });
 

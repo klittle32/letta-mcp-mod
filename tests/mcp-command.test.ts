@@ -56,9 +56,9 @@ describe("parseMcpCommandArgs", () => {
 
     expect(result.kind).toBe("error");
     if (result.kind === "error") {
-      expect(result.message).toContain('Unknown /lmcp command "wat"');
+      expect(result.message).toContain('Unknown /toolbox command "wat"');
       expect(result.message).toContain("Usage:");
-      expect(result.message).toContain("/lmcp reconnect <server>");
+      expect(result.message).toContain("/toolbox reconnect <server>");
     }
   });
 
@@ -73,19 +73,19 @@ describe("parseMcpCommandArgs", () => {
 });
 
 describe("formatCommandHelp", () => {
-  it("documents supported /lmcp command forms", () => {
+  it("documents supported /toolbox command forms", () => {
     const help = formatCommandHelp();
 
     expect(help).toContain("Usage:");
-    expect(help).toContain("/lmcp status");
-    expect(help).toContain("/lmcp tools");
-    expect(help).toContain("/lmcp reconnect");
-    expect(help).toContain("/lmcp reconnect <server>");
-    expect(help).toContain("/lmcp auth-start <server>");
-    expect(help).toContain("/lmcp auth-complete <server> <redirectUrl>");
-    expect(help).toContain("/lmcp auth-clear <server>");
-    expect(help).toContain("/lmcp setup");
-    expect(help).toContain("/lmcp setup create");
+    expect(help).toContain("/toolbox status");
+    expect(help).toContain("/toolbox tools");
+    expect(help).toContain("/toolbox reconnect");
+    expect(help).toContain("/toolbox reconnect <server>");
+    expect(help).toContain("/toolbox auth-start <server>");
+    expect(help).toContain("/toolbox auth-complete <server> <redirectUrl>");
+    expect(help).toContain("/toolbox auth-clear <server>");
+    expect(help).toContain("/toolbox setup");
+    expect(help).toContain("/toolbox setup create");
   });
 });
 
@@ -127,16 +127,16 @@ describe("formatStatusCommand", () => {
   it("empty state includes adapter heading and zero configured servers", () => {
     const text = formatStatusCommand(commandState());
 
-    expect(text).toContain("MCP Adapter");
-    expect(text).toContain("MCP: 0 configured servers");
+    expect(text).toContain("Toolbox");
+    expect(text).toContain("Toolbox: 0 configured servers");
   });
 
   it("includes command hints", () => {
     const text = formatStatusCommand(commandState());
 
-    expect(text).toContain("/lmcp tools");
-    expect(text).toContain("/lmcp reconnect");
-    expect(text).toContain("/lmcp setup");
+    expect(text).toContain("/toolbox tools");
+    expect(text).toContain("/toolbox reconnect");
+    expect(text).toContain("/toolbox setup");
   });
 
   it("preserves warnings from proxy state", () => {
@@ -151,22 +151,22 @@ describe("formatToolsCommand", () => {
   it("no configured servers suggests setup", () => {
     const text = formatToolsCommand(commandState());
 
-    expect(text).toContain("No MCP servers configured");
-    expect(text).toContain("/lmcp setup");
+    expect(text).toContain("No integration servers configured");
+    expect(text).toContain("/toolbox setup");
   });
 
   it("configured server with no cache suggests reconnect", () => {
     const text = formatToolsCommand(commandState({ config: { mcpServers: { fixture: fixtureDefinition } } }));
 
-    expect(text).toContain("No cached MCP tools");
-    expect(text).toContain("/lmcp reconnect");
-    expect(text).toContain("/lmcp reconnect fixture");
+    expect(text).toContain("No cached tools");
+    expect(text).toContain("/toolbox reconnect");
+    expect(text).toContain("/toolbox reconnect fixture");
   });
 
   it("cached tools are grouped by server", () => {
     const text = formatToolsCommand(cachedFixtureState());
 
-    expect(text).toContain("Cached MCP tools");
+    expect(text).toContain("Cached tools");
     expect(text).toContain("fixture:");
     expect(text).toContain("- fixture_echo — Echo a message");
     expect(text).toContain("- fixture_list_items — List fixture items [UI resource: ui://fixture/list.html]");
@@ -211,7 +211,7 @@ describe("formatSetupCommand", () => {
     const { home, cwd } = tempCommandWorkspace();
     const text = formatSetupCommand({ cwd, home });
 
-    expect(text).toContain("MCP setup");
+    expect(text).toContain("Toolbox setup");
     expect(text).toContain(`[missing] user-standard: ${join(home, ".config", "mcp", "mcp.json")}`);
     expect(text).toContain(`[missing] letta-global: ${join(home, ".letta", "mcp-adapter", "mcp.json")}`);
     expect(text).toContain(`[missing] project-standard: ${join(cwd, ".mcp.json")}`);
@@ -278,7 +278,7 @@ describe("createStarterProjectConfig", () => {
 
     expect(result.ok).toBe(true);
     expect(existsSync(join(cwd, ".mcp.json"))).toBe(true);
-    expect(result.message).toContain("Created starter MCP config");
+    expect(result.message).toContain("Created starter Toolbox config");
   });
 
   it("created JSON parses and has an example node command", () => {
@@ -310,7 +310,7 @@ describe("createStarterProjectConfig", () => {
     const result = createStarterProjectConfig({ cwd });
 
     expect(result.message).toContain('Edit the "example" server command/args');
-    expect(result.message).toContain("/lmcp reconnect example");
+    expect(result.message).toContain("/toolbox reconnect example");
   });
 
   it("plain setup still does not create a file", () => {
@@ -343,7 +343,7 @@ describe("executeReconnectCommand", () => {
 
       const text = await executeReconnectCommand(runtime, { cwd }, state, "fixture");
 
-      expect(text).toContain("MCP reconnect: fixture");
+      expect(text).toContain("Toolbox reconnect: fixture");
       expect(text).toContain('Connected to "fixture" and cached 5 tools, 2 resources.');
       expect(text).toContain("Cache:");
     } finally {
@@ -374,7 +374,7 @@ describe("executeReconnectCommand", () => {
       const text = await executeReconnectCommand(runtime, { cwd }, runtime.loadState({ cwd }), "missing");
 
       expect(text).toContain('Server "missing" is not configured');
-      expect(text).toContain("/lmcp status");
+      expect(text).toContain("/toolbox status");
     } finally {
       await runtime.closeAll();
     }
@@ -390,10 +390,10 @@ describe("executeReconnectCommand", () => {
       const tools = formatToolsCommand(runtime.loadState({ cwd }));
       const status = formatStatusCommand(runtime.loadState({ cwd }));
 
-      expect(text).toContain("MCP reconnect: remote");
+      expect(text).toContain("Toolbox reconnect: remote");
       expect(text).toContain('Connected to "remote" and cached 3 tools, 1 resource.');
       expect(tools).toContain("remote_echo");
-      expect(status).toContain("MCP: 1 configured servers");
+      expect(status).toContain("Toolbox: 1 configured servers");
       expect(status).toContain("4 cached tools");
     } finally {
       await runtime.closeAll();
@@ -424,7 +424,7 @@ describe("executeReconnectCommand", () => {
       const status = formatStatusCommand(runtime.loadState({ cwd }));
 
       expect(text).toContain('Failed to connect to "broken"');
-      expect(status).toContain("MCP: 1 configured servers");
+      expect(status).toContain("Toolbox: 1 configured servers");
     } finally {
       await runtime.closeAll();
     }
@@ -440,7 +440,7 @@ describe("executeReconnectCommand", () => {
     try {
       const text = await executeReconnectCommand(runtime, { cwd }, runtime.loadState({ cwd }));
 
-      expect(text).toContain("MCP reconnect");
+      expect(text).toContain("Toolbox reconnect");
       expect(text).toContain("[ok] fixture: cached 5 tools, 2 resources");
       expect(text).toContain('[error] broken: Failed to connect to "broken"');
       expect(text).toContain("Refreshed 1/2 servers.");
@@ -475,8 +475,8 @@ describe("executeReconnectCommand", () => {
     try {
       const text = await executeReconnectCommand(runtime, { cwd }, runtime.loadState({ cwd }));
 
-      expect(text).toContain("No MCP servers configured");
-      expect(text).toContain("/lmcp setup");
+      expect(text).toContain("No integration servers configured");
+      expect(text).toContain("/toolbox setup");
     } finally {
       await runtime.closeAll();
     }
@@ -491,7 +491,7 @@ describe("executeReconnectCommand", () => {
     try {
       const text = await executeReconnectCommand(runtime, { cwd, signal: controller.signal }, runtime.loadState({ cwd }), "fixture");
 
-      expect(text).toBe("MCP command cancelled.");
+      expect(text).toBe("Toolbox command cancelled.");
       expect(runtime.manager.getConnection("fixture")).toBeUndefined();
     } finally {
       await runtime.closeAll();
@@ -502,11 +502,11 @@ describe("executeReconnectCommand", () => {
 import { createMcpCommand, executeMcpCommand } from "../src/features/mcp-command.js";
 
 describe("createMcpCommand", () => {
-  it("defines the lmcp command metadata", () => {
+  it("defines the toolbox command metadata", () => {
     const command = createMcpCommand();
 
-    expect(command.id).toBe("lmcp");
-    expect(command.description).toContain("MCP");
+    expect(command.id).toBe("toolbox");
+    expect(command.description).toContain("Toolbox");
     expect(command.description).toContain("setup");
     expect(command.description).toContain("OAuth");
     expect(command.description).toContain("reconnect");
@@ -526,7 +526,7 @@ describe("createMcpCommand", () => {
       const result = await command.run({ cwd, args: "status" });
 
       expect(result.type).toBe("output");
-      expect(result.output).toContain("MCP Adapter");
+      expect(result.output).toContain("Toolbox");
     } finally {
       await runtime.closeAll();
     }
@@ -542,9 +542,9 @@ describe("createMcpCommand", () => {
 
       const result = await command.run({ cwd, args: "status" });
 
-      expect(result.output).toContain("MCP Adapter");
-      expect(ui.ui.openPanel).toHaveBeenCalledWith({ id: "letta-lmcp-command", content: ["Running /lmcp status..."], order: 100 });
-      expect(panel.update).toHaveBeenCalledWith({ content: ["MCP command complete."] });
+      expect(result.output).toContain("Toolbox");
+      expect(ui.ui.openPanel).toHaveBeenCalledWith({ id: "letta-toolbox-command", content: ["Running /toolbox status..."], order: 100 });
+      expect(panel.update).toHaveBeenCalledWith({ content: ["Toolbox command complete."] });
       expect(panel.close).toHaveBeenCalledTimes(1);
     } finally {
       await runtime.closeAll();
@@ -577,7 +577,7 @@ describe("createMcpCommand", () => {
       const result = await command.run({ cwd, home, args: "setup" });
 
       expect(result).toMatchObject({ type: "output" });
-      expect(result.output).toContain("MCP setup");
+      expect(result.output).toContain("Toolbox setup");
     } finally {
       await runtime.closeAll();
     }
@@ -651,7 +651,7 @@ describe("createMcpCommand", () => {
 
       const result = await command.run({ cwd, args: "status", signal: controller.signal });
 
-      expect(result).toEqual({ type: "output", output: "MCP command cancelled." });
+      expect(result).toEqual({ type: "output", output: "Toolbox command cancelled." });
     } finally {
       await runtime.closeAll();
     }
@@ -665,7 +665,7 @@ describe("executeMcpCommand", () => {
     try {
       const output = await executeMcpCommand("setup --write", runtime, { cwd, home });
 
-      expect(output).toContain("Created starter MCP config");
+      expect(output).toContain("Created starter Toolbox config");
       expect(existsSync(join(cwd, ".mcp.json"))).toBe(true);
     } finally {
       await runtime.closeAll();
@@ -679,7 +679,7 @@ describe("executeMcpCommand", () => {
       const output = await executeMcpCommand("help", runtime, { cwd, home });
 
       expect(output).toContain("Usage:");
-      expect(output).toContain("/lmcp reconnect <server>");
+      expect(output).toContain("/toolbox reconnect <server>");
     } finally {
       await runtime.closeAll();
     }

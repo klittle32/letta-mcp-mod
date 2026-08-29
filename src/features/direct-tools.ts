@@ -31,7 +31,7 @@ export function collectDirectToolDescriptors(state: ProxyState): DirectToolDescr
 
     if (!server.cacheEntry || !server.cacheValid) {
       const cacheState = server.cacheEntry ? "stale" : "missing";
-      warnings.push(`Direct tools for "${server.name}" are configured but metadata cache is ${cacheState}. Run /lmcp reconnect ${server.name} then /reload.`);
+      warnings.push(`Direct tools for "${server.name}" are configured but metadata cache is ${cacheState}. Run /toolbox reconnect ${server.name} then /reload.`);
       continue;
     }
 
@@ -47,7 +47,7 @@ export function collectDirectToolDescriptors(state: ProxyState): DirectToolDescr
         name: tool.name,
         serverName: server.name,
         originalName: tool.originalName,
-        description: tool.description || `Call MCP tool ${tool.originalName} on ${server.name}.`,
+        description: tool.description || `Call external tool ${tool.originalName} on ${server.name}.`,
         parameters: tool.resourceUri ? emptyObjectSchema() : (tool.inputSchema ?? emptyObjectSchema()),
         ...(tool.annotations ? { annotations: tool.annotations } : {}),
         ...(tool.resourceUri ? { resourceUri: tool.resourceUri } : {}),
@@ -61,12 +61,12 @@ export function collectDirectToolDescriptors(state: ProxyState): DirectToolDescr
 export function createDirectMcpTool(descriptor: DirectToolDescriptor, runtime: AdapterRuntime): LettaToolDefinition {
   return {
     name: descriptor.name,
-    description: descriptor.description || `Call MCP tool ${descriptor.originalName} on ${descriptor.serverName}.`,
+    description: descriptor.description || `Call external tool ${descriptor.originalName} on ${descriptor.serverName}.`,
     parameters: normalizeDirectToolParameters(descriptor),
     requiresApproval: true,
     parallelSafe: false,
     async run(ctx) {
-      if (ctx.signal?.aborted) return "MCP request cancelled.";
+      if (ctx.signal?.aborted) return "External tool request cancelled.";
       const state = runtime.loadState(ctx);
       const invocationCtx: RuntimeToolContext = {
         cwd: ctx.cwd,
@@ -93,7 +93,7 @@ export function registerCachedDirectTools(options: {
     const state = runtime.loadState({ cwd: activationCwd });
     collection = collectDirectToolDescriptors(state);
   } catch (error) {
-    reportWarning(letta, `Failed to load cached MCP direct tools: ${error instanceof Error ? error.message : String(error)}`);
+    reportWarning(letta, `Failed to load cached direct tools: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 
@@ -109,7 +109,7 @@ export function registerCachedDirectTools(options: {
     } catch (error) {
       reportWarning(
         letta,
-        `Failed to register direct MCP tool "${descriptor.name}": ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to register direct tool "${descriptor.name}": ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

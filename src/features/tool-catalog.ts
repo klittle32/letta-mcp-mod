@@ -76,14 +76,14 @@ export function loadInvocationProxyState(ctx: { cwd: string }): ProxyState {
 export function executeStatus(state: ProxyState): string {
   const configured = state.servers.size;
   const cachedTools = [...state.servers.values()].reduce((count, server) => count + server.tools.length, 0);
-  const lines = [`MCP: ${configured} configured servers, ${cachedTools} cached ${plural(cachedTools, "tool")}.`];
+  const lines = [`Toolbox: ${configured} configured servers, ${cachedTools} cached ${plural(cachedTools, "tool")}.`];
 
   if (state.warnings.length > 0) {
     lines.push("", "Warnings:", ...state.warnings.map((warning) => `- ${warning}`));
   }
 
   if (configured === 0) {
-    lines.push("", "No MCP servers configured.", "Create a .mcp.json in this workspace or configure ~/.config/mcp/mcp.json.");
+    lines.push("", "No integration servers configured.", "Run /toolbox setup for configuration guidance.");
     return lines.join("\n");
   }
 
@@ -97,15 +97,15 @@ export function executeStatus(state: ProxyState): string {
       lines.push(`- ${server.name} (${server.tools.length} cached ${plural(server.tools.length, "tool")})`);
     }
   }
-  lines.push("", "Use /lmcp reconnect <server> to refresh cached metadata.");
+  lines.push("", "Use /toolbox reconnect <server> to refresh cached metadata.");
   return lines.join("\n");
 }
 
 export function executeListServer(state: ProxyState, serverName: string): string {
   const server = state.servers.get(serverName);
-  if (!server) return `Server "${serverName}" is not configured. Use /lmcp status to list configured servers.`;
-  if (!server.cacheEntry) return `Server "${serverName}" is configured but has no metadata cache. Use /lmcp reconnect ${serverName} to create it.`;
-  if (!server.cacheValid) return `Server "${serverName}" has a stale metadata cache. Use /lmcp reconnect ${serverName} to refresh it.`;
+  if (!server) return `Server "${serverName}" is not configured. Use /toolbox status to list configured servers.`;
+  if (!server.cacheEntry) return `Server "${serverName}" is configured but has no metadata cache. Use /toolbox reconnect ${serverName} to create it.`;
+  if (!server.cacheValid) return `Server "${serverName}" has a stale metadata cache. Use /toolbox reconnect ${serverName} to refresh it.`;
   if (server.tools.length === 0) return `${serverName} (0 cached tools).`;
 
   return [`${serverName} (${server.tools.length} cached ${plural(server.tools.length, "tool")}):`, "", ...server.tools.map(formatToolListItem)].join("\n");
@@ -122,7 +122,7 @@ export function executeSearch(
   const query = args.query.trim();
   if (!query) return "A search query is required.";
   if (state.servers.size === 0) {
-    return "No external integrations are configured. Run /lmcp setup to configure an MCP server.";
+    return "No external integrations are configured. Run /toolbox setup to configure an integration server.";
   }
 
   const limit = normalizeSearchLimit(args.limit);

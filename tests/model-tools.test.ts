@@ -26,6 +26,16 @@ function writeConfig(cwd: string, mcpServers: Record<string, unknown>) {
 }
 
 describe("search_tools", () => {
+  it("keeps protocol terminology out of agent-facing tool descriptions", () => {
+    const runtime = createAdapterRuntime();
+    const descriptions = [
+      createSearchToolsTool(runtime).description,
+      createCallToolTool(runtime).description,
+    ];
+
+    expect(descriptions.join("\n")).not.toMatch(/\bmcp\b/i);
+  });
+
   it("refreshes missing metadata and returns callable names with schemas", async () => {
     const { home, cwd } = tempWorkspace();
     writeConfig(cwd, { fixture: stdioDefinition() });
@@ -121,7 +131,7 @@ describe("call_tool", () => {
         args: { name: "fixture_get_fixture_readme", args: {} },
       });
 
-      expect(failed).toContain('MCP tool "fixture_fail_soft" on "fixture" returned an error.');
+      expect(failed).toContain('External tool "fixture_fail_soft" on "fixture" returned an error.');
       expect(failed).toContain("fixture failure");
       expect(resource).toContain('Read resource "fixture://readme" from "fixture".');
       expect(resource).toContain("Fixture README content");

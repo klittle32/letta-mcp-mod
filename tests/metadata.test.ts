@@ -85,6 +85,6 @@ describe("discoverServerMetadata", () => {
     ] as never, warnings);
 
     expect(tools.map((tool) => tool.name)).toEqual(["safe"]);
-    expect(warnings).toEqual(['Dropped MCP tool "invalid" because its annotations are invalid.']);
+    expect(warnings).toEqual(['Dropped external tool "invalid" because its annotations are invalid.']);
   });
 });

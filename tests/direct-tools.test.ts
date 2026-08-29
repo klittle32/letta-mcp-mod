@@ -144,7 +144,7 @@ describe("direct tool descriptor collection", () => {
     expect(result.descriptors).toEqual([]);
     expect(result.warnings.join("\n")).toContain('Direct tools for "missing" are configured but metadata cache is missing');
     expect(result.warnings.join("\n")).toContain('Direct tools for "stale" are configured but metadata cache is stale');
-    expect(result.warnings.join("\n")).toContain('/lmcp reconnect');
+    expect(result.warnings.join("\n")).toContain('/toolbox reconnect');
   });
 
   it("honors excludeTools before direct tool selection", () => {
@@ -288,7 +288,7 @@ describe("direct MCP tool definitions", () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(tool.run({ cwd: "/tmp/workspace", args: { message: "hello" } as never, signal: controller.signal })).resolves.toBe("MCP request cancelled.");
+    await expect(tool.run({ cwd: "/tmp/workspace", args: { message: "hello" } as never, signal: controller.signal })).resolves.toBe("External tool request cancelled.");
     expect(runtime.loadState).not.toHaveBeenCalled();
     expect(runtime.callTool).not.toHaveBeenCalled();
   });
@@ -413,6 +413,6 @@ describe("cached direct tool registration", () => {
     })).not.toThrow();
     expect(registeredNames).toEqual(new Set());
     expect(letta.diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ severity: "warning", message: expect.stringContaining('Direct tools for "stale"') }));
-    expect(letta.diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ severity: "warning", message: expect.stringContaining("Failed to register direct MCP tool") }));
+    expect(letta.diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ severity: "warning", message: expect.stringContaining("Failed to register direct tool") }));
   });
 });

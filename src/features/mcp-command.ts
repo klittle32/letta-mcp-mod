@@ -24,52 +24,52 @@ export function parseMcpCommandArgs(rawArgs: string | undefined): ParsedMcpComma
 
   switch (command) {
     case "status":
-      return rest.length === 0 ? { kind: "status" } : usageError("/lmcp status does not accept extra arguments.");
+      return rest.length === 0 ? { kind: "status" } : usageError("/toolbox status does not accept extra arguments.");
     case "tools":
-      return rest.length === 0 ? { kind: "tools" } : usageError("/lmcp tools does not accept extra arguments.");
+      return rest.length === 0 ? { kind: "tools" } : usageError("/toolbox tools does not accept extra arguments.");
     case "reconnect":
       if (rest.length === 0) return { kind: "reconnect" };
       if (rest.length === 1) return { kind: "reconnect", serverName: rest[0] };
-      return usageError("/lmcp reconnect accepts at most one server name.");
+      return usageError("/toolbox reconnect accepts at most one server name.");
     case "auth-start":
-      return rest.length === 1 ? { kind: "oauth", action: "auth-start", serverName: rest[0] } : usageError("/lmcp auth-start requires exactly one server name.");
+      return rest.length === 1 ? { kind: "oauth", action: "auth-start", serverName: rest[0] } : usageError("/toolbox auth-start requires exactly one server name.");
     case "auth-complete": {
       const match = trimmed.match(/^auth-complete\s+(\S+)\s+([\s\S]+)$/);
-      if (!match) return usageError("/lmcp auth-complete requires a server name and redirected URL.");
+      if (!match) return usageError("/toolbox auth-complete requires a server name and redirected URL.");
       return { kind: "oauth", action: "auth-complete", serverName: match[1], rawArgs: JSON.stringify({ redirectUrl: match[2].trim() }) };
     }
     case "auth-status":
       if (rest.length === 0) return { kind: "oauth", action: "auth-status" };
       if (rest.length === 1) return { kind: "oauth", action: "auth-status", serverName: rest[0] };
-      return usageError("/lmcp auth-status accepts at most one server name.");
+      return usageError("/toolbox auth-status accepts at most one server name.");
     case "auth-clear":
-      return rest.length === 1 ? { kind: "oauth", action: "auth-clear", serverName: rest[0] } : usageError("/lmcp auth-clear requires exactly one server name.");
+      return rest.length === 1 ? { kind: "oauth", action: "auth-clear", serverName: rest[0] } : usageError("/toolbox auth-clear requires exactly one server name.");
     case "setup":
       if (rest.length === 0) return { kind: "setup", create: false };
       if (rest.length === 1 && (rest[0] === "create" || rest[0] === "--write")) return { kind: "setup", create: true };
-      return usageError("/lmcp setup accepts only 'create' or '--write'.");
+      return usageError("/toolbox setup accepts only 'create' or '--write'.");
     case "help":
     case "--help":
-      return rest.length === 0 ? { kind: "help" } : usageError(`/lmcp ${command} does not accept extra arguments.`);
+      return rest.length === 0 ? { kind: "help" } : usageError(`/toolbox ${command} does not accept extra arguments.`);
     default:
-      return { kind: "error", message: `Unknown /lmcp command "${command}".\n\n${formatCommandHelp()}` };
+      return { kind: "error", message: `Unknown /toolbox command "${command}".\n\n${formatCommandHelp()}` };
   }
 }
 
 export function formatCommandHelp(): string {
   return [
     "Usage:",
-    "- /lmcp — show MCP adapter status",
-    "- /lmcp status — show MCP adapter status",
-    "- /lmcp tools — list cached MCP tools",
-    "- /lmcp reconnect — reconnect and refresh all configured servers",
-    "- /lmcp reconnect <server> — reconnect and refresh one server",
-    "- /lmcp auth-start <server> — start OAuth login for one server",
-    "- /lmcp auth-complete <server> <redirectUrl> — finish OAuth login with the redirected URL",
-    "- /lmcp auth-status <server> — show OAuth token status for one server",
-    "- /lmcp auth-clear <server> — clear stored OAuth credentials for one server",
-    "- /lmcp setup — show config paths and starter .mcp.json",
-    "- /lmcp setup create — create a starter project .mcp.json if missing",
+    "- /toolbox — show integration status",
+    "- /toolbox status — show integration status",
+    "- /toolbox tools — list cached tools",
+    "- /toolbox reconnect — reconnect and refresh all configured servers",
+    "- /toolbox reconnect <server> — reconnect and refresh one server",
+    "- /toolbox auth-start <server> — start OAuth login for one server",
+    "- /toolbox auth-complete <server> <redirectUrl> — finish OAuth login with the redirected URL",
+    "- /toolbox auth-status <server> — show OAuth token status for one server",
+    "- /toolbox auth-clear <server> — clear stored OAuth credentials for one server",
+    "- /toolbox setup — show config paths and starter configuration",
+    "- /toolbox setup create — create a starter project configuration if missing",
   ].join("\n");
 }
 
@@ -80,44 +80,44 @@ function usageError(message: string): ParsedMcpCommand {
 
 export function formatStatusCommand(state: ProxyState): string {
   return [
-    "MCP Adapter",
+    "Toolbox",
     "",
     executeStatus(state),
     "",
     "Commands:",
-    "- /lmcp tools — list cached MCP tools",
-    "- /lmcp reconnect — reconnect and refresh all configured servers",
-    "- /lmcp reconnect <server> — reconnect and refresh one server",
-    "- /lmcp auth-start <server> — start OAuth login for one server",
-    "- /lmcp auth-complete <server> <redirectUrl> — finish OAuth login",
-    "- /lmcp auth-clear <server> — clear stored OAuth credentials",
-    "- /lmcp setup — show config paths and starter .mcp.json",
+    "- /toolbox tools — list cached tools",
+    "- /toolbox reconnect — reconnect and refresh all configured servers",
+    "- /toolbox reconnect <server> — reconnect and refresh one server",
+    "- /toolbox auth-start <server> — start OAuth login for one server",
+    "- /toolbox auth-complete <server> <redirectUrl> — finish OAuth login",
+    "- /toolbox auth-clear <server> — clear stored OAuth credentials",
+    "- /toolbox setup — show config paths and starter configuration",
   ].join("\n");
 }
 
 export function formatToolsCommand(state: ProxyState): string {
   if (state.servers.size === 0) {
     return [
-      "Cached MCP tools",
+      "Cached tools",
       "",
-      "No MCP servers configured.",
-      "Run /lmcp setup to see config paths and a starter .mcp.json.",
+      "No integration servers configured.",
+      "Run /toolbox setup to see config paths and a starter configuration.",
     ].join("\n");
   }
 
   const serversWithTools = [...state.servers.values()].filter((server) => server.tools.length > 0);
   if (serversWithTools.length === 0) {
     const firstServer = state.servers.keys().next().value as string | undefined;
-    const reconnectOne = firstServer ? ` or /lmcp reconnect ${firstServer}` : "";
+    const reconnectOne = firstServer ? ` or /toolbox reconnect ${firstServer}` : "";
     return [
-      "Cached MCP tools",
+      "Cached tools",
       "",
-      "No cached MCP tools are available.",
-      `Run /lmcp reconnect${reconnectOne} to refresh metadata.`,
+      "No cached tools are available.",
+      `Run /toolbox reconnect${reconnectOne} to refresh metadata.`,
     ].join("\n");
   }
 
-  const lines = ["Cached MCP tools"];
+  const lines = ["Cached tools"];
   for (const server of serversWithTools) {
     lines.push("", `${server.name}:`);
     for (const tool of server.tools) {
@@ -152,7 +152,7 @@ export function starterMcpConfigJson(): string {
 export function formatSetupCommand(ctx: Pick<McpCommandContext, "cwd" | "home" | "env">): string {
   const home = ctx.home ?? homedir();
   const loaded = loadMcpConfig({ cwd: ctx.cwd, home, env: ctx.env });
-  const lines = ["MCP setup", "", "Config sources, in merge order:"];
+  const lines = ["Toolbox setup", "", "Config sources, in merge order:"];
 
   for (const source of loaded.sources) {
     const status = source.exists ? source.loaded ? "exists, loaded" : "exists, not loaded" : "missing";
@@ -172,7 +172,7 @@ export function formatSetupCommand(ctx: Pick<McpCommandContext, "cwd" | "home" |
     starterMcpConfigJson().trimEnd(),
     "",
     "To create a starter project config, run:",
-    "/lmcp setup create",
+    "/toolbox setup create",
   );
 
   return lines.join("\n");
@@ -187,7 +187,7 @@ export function createStarterProjectConfig(ctx: Pick<McpCommandContext, "cwd">):
     return {
       ok: false,
       path,
-      message: [`MCP config already exists:`, path, "", "Plain /lmcp setup shows config paths and starter JSON."].join("\n"),
+      message: [`Toolbox config already exists:`, path, "", "Plain /toolbox setup shows config paths and starter JSON."].join("\n"),
     };
   }
 
@@ -197,11 +197,11 @@ export function createStarterProjectConfig(ctx: Pick<McpCommandContext, "cwd">):
     ok: true,
     path,
     message: [
-      "Created starter MCP config:",
+      "Created starter Toolbox config:",
       path,
       "",
       'Edit the "example" server command/args, then run:',
-      "/lmcp reconnect example",
+      "/toolbox reconnect example",
     ].join("\n"),
   };
 }
@@ -213,25 +213,25 @@ export async function executeReconnectCommand(
   state: ProxyState,
   serverName?: string,
 ): Promise<string> {
-  if (ctx.signal?.aborted) return "MCP command cancelled.";
+  if (ctx.signal?.aborted) return "Toolbox command cancelled.";
 
   if (serverName) {
     if (!state.servers.has(serverName)) {
-      return `Server "${serverName}" is not configured. Use /lmcp status to list configured servers.`;
+      return `Server "${serverName}" is not configured. Use /toolbox status to list configured servers.`;
     }
     return reconnectOne(runtime, ctx, serverName);
   }
 
   const serverNames = [...state.servers.keys()];
   if (serverNames.length === 0) {
-    return ["MCP reconnect", "", "No MCP servers configured.", "Run /lmcp setup to see config paths and a starter .mcp.json."].join("\n");
+    return ["Toolbox reconnect", "", "No integration servers configured.", "Run /toolbox setup to see config paths and a starter configuration."].join("\n");
   }
 
-  const lines = ["MCP reconnect", ""];
+  const lines = ["Toolbox reconnect", ""];
   let successCount = 0;
   for (const name of serverNames) {
     if (ctx.signal?.aborted) {
-      lines.push("MCP command cancelled.");
+      lines.push("Toolbox command cancelled.");
       break;
     }
     const result = await reconnectOneRaw(runtime, ctx, name);
@@ -250,7 +250,7 @@ async function reconnectOne(runtime: AdapterRuntime, ctx: McpCommandContext, ser
   const result = await reconnectOneRaw(runtime, ctx, serverName);
   if (!result.ok) return result.message;
   return [
-    `MCP reconnect: ${serverName}`,
+    `Toolbox reconnect: ${serverName}`,
     "",
     `Connected to "${serverName}" and cached ${result.tools} ${plural(result.tools, "tool")}, ${result.resources} ${plural(result.resources, "resource")}.`,
     `Cache: ${result.cachePath}`,
@@ -295,15 +295,15 @@ export interface McpCommandUi {
 
 export function createMcpCommand(runtime: AdapterRuntime = createAdapterRuntime(), ui?: McpCommandUi): LettaCommandDefinition {
   return {
-    id: "lmcp",
-    description: "Show MCP adapter status, list cached tools, reconnect servers, manage OAuth login, and display setup guidance.",
+    id: "toolbox",
+    description: "Show Toolbox status, list cached tools, reconnect integrations, manage OAuth login, and display setup guidance.",
     args: "[status|tools|reconnect [server]|auth-start <server>|auth-complete <server> <redirectUrl>|auth-status [server]|auth-clear <server>|setup [create|--write]|help]",
     async run(ctx) {
-      if (ctx.signal?.aborted) return { type: "output", output: "MCP command cancelled." };
+      if (ctx.signal?.aborted) return { type: "output", output: "Toolbox command cancelled." };
       const panel = openMcpCommandPanel(ui, ctx.args);
       try {
         const output = await executeMcpCommand(ctx.args, runtime, ctx);
-        panel?.update({ content: ["MCP command complete."] });
+        panel?.update({ content: ["Toolbox command complete."] });
         return { type: "output", output };
       } finally {
         panel?.close();
@@ -314,12 +314,12 @@ export function createMcpCommand(runtime: AdapterRuntime = createAdapterRuntime(
 
 function openMcpCommandPanel(ui: McpCommandUi | undefined, args: string | undefined): { update(options: { content: string | string[] }): void; close(): void } | undefined {
   if (!ui?.capabilities?.ui?.panels || !ui.ui?.openPanel) return undefined;
-  const label = args?.trim() ? `/lmcp ${args.trim()}` : "/lmcp status";
-  return ui.ui.openPanel({ id: "letta-lmcp-command", content: [`Running ${label}...`], order: 100 });
+  const label = args?.trim() ? `/toolbox ${args.trim()}` : "/toolbox status";
+  return ui.ui.openPanel({ id: "letta-toolbox-command", content: [`Running ${label}...`], order: 100 });
 }
 
 export async function executeMcpCommand(rawArgs: string | undefined, runtime: AdapterRuntime, ctx: McpCommandContext): Promise<string> {
-  if (ctx.signal?.aborted) return "MCP command cancelled.";
+  if (ctx.signal?.aborted) return "Toolbox command cancelled.";
 
   const parsed = parseMcpCommandArgs(rawArgs);
   switch (parsed.kind) {

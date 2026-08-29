@@ -112,13 +112,13 @@ describe("Letta mod registration", () => {
     expect(registeredTools).toHaveLength(0);
   });
 
-  it("registers the lmcp command independently of model tools", () => {
+  it("registers the toolbox command independently of model tools", () => {
     const { letta, registeredCommands } = createFakeLetta({ tools: false, commands: true });
 
     activate(letta, createFakeRuntime());
 
     expect(registeredCommands).toHaveLength(1);
-    expect(registeredCommands[0]).toMatchObject({ id: "lmcp" });
+    expect(registeredCommands[0]).toMatchObject({ id: "toolbox" });
   });
 
   it("registers the permission overlay when available", () => {
@@ -131,7 +131,7 @@ describe("Letta mod registration", () => {
     activate(letta, createFakeRuntime());
 
     expect(registeredPermissions).toHaveLength(1);
-    expect(registeredPermissions[0]).toMatchObject({ id: "letta-mcp-adapter-permissions" });
+    expect(registeredPermissions[0]).toMatchObject({ id: "letta-toolbox-permissions" });
   });
 
   it("registers cache-backed direct tools after both catalog tools", () => {
@@ -159,9 +159,9 @@ describe("Letta mod registration", () => {
       activationCwd: "/tmp/activation",
     });
 
-    expect(letta.ui?.setStatus).toHaveBeenCalledWith("mcp", "1 server, 1 tool");
+    expect(letta.ui?.setStatus).toHaveBeenCalledWith("toolbox", "1 server, 1 tool");
     await dispose?.();
-    expect(letta.ui?.clearStatus).toHaveBeenCalledWith("mcp");
+    expect(letta.ui?.clearStatus).toHaveBeenCalledWith("toolbox");
   });
 
   it("activation reads cached state but performs no live MCP work", () => {

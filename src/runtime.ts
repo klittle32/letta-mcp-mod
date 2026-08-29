@@ -103,7 +103,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
   async function connectAndRefreshServer(ctx: RuntimeToolContext, serverName: string): Promise<ConnectRefreshResult> {
     const { config, cache, warnings } = loadConfigAndCache(ctx);
     const definition = config.mcpServers[serverName];
-    if (!definition) throw new ServerNotConfiguredError(`Server "${serverName}" is not configured. Use /lmcp status to list configured servers.`);
+    if (!definition) throw new ServerNotConfiguredError(`Server "${serverName}" is not configured. Use /toolbox status to list configured servers.`);
 
     const initialIdentityHash = resolveCacheIdentityHash({ serverName, definition, home, env });
     const cacheEntry = getServerCacheEntry(cache, serverName, initialIdentityHash);
@@ -198,14 +198,14 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
       return connectAndRefreshServer(ctx, serverName);
     },
     async callTool(ctx, state, toolName, args, callOptions) {
-      if (ctx.signal?.aborted) return { ok: false, message: "MCP request cancelled." };
+      if (ctx.signal?.aborted) return { ok: false, message: "External tool request cancelled." };
 
       const resolved = await resolveTargetWithLazyRefresh(ctx, state, toolName);
       if (!resolved.ok) return { ok: false, message: resolved.message };
 
       const target = resolved.target;
       const definition = resolved.state.config.mcpServers[target.serverName];
-      if (!definition) return { ok: false, message: `Server "${target.serverName}" is not configured. Use /lmcp status to list configured servers.` };
+      if (!definition) return { ok: false, message: `Server "${target.serverName}" is not configured. Use /toolbox status to list configured servers.` };
       const guardOutput = (output: string, rawResult: unknown) => guardMcpOutput(output, rawResult, {
         home,
         serverName: target.serverName,
@@ -279,7 +279,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
         }
         const rendered = renderCallToolResult(result);
         const heading = rendered.isError
-          ? `MCP tool "${target.exposedName}" on "${target.serverName}" returned an error.`
+          ? `External tool "${target.exposedName}" on "${target.serverName}" returned an error.`
           : `Called "${target.exposedName}" on "${target.serverName}".`;
         const output = [heading, "", rendered.text].join("\n").trimEnd();
         return { ok: true, target, output: await guardOutput(output, result), isError: rendered.isError };
@@ -291,17 +291,17 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
         if (isUnfulfillableInputRequest(error)) {
           return {
             ok: false,
-            message: `MCP tool "${target.exposedName}" on "${target.serverName}" requires additional input, but Letta Code's public mod API does not provide an interactive input handler for a running tool call. The call was not continued, and no continuation state or unresolved result was retained.`,
+            message: `External tool "${target.exposedName}" on "${target.serverName}" requires additional input, but Letta Code's public mod API does not provide an interactive input handler for a running tool call. The call was not continued, and no continuation state or unresolved result was retained.`,
           };
         }
         if (isUnsupportedTaskResult(error)) {
           return {
             ok: false,
-            message: `MCP tool "${target.exposedName}" on "${target.serverName}" returned an asynchronous task, but the MCP client SDK in this build cannot consume the modern Tasks extension yet. The adapter did not opt in or poll the task. Upgrade after modelcontextprotocol/typescript-sdk#2189 is implemented.`,
+            message: `External tool "${target.exposedName}" on "${target.serverName}" returned an asynchronous task, but this build cannot consume the server's modern Tasks extension yet. The adapter did not opt in or poll the task. Upgrade after modelcontextprotocol/typescript-sdk#2189 is implemented.`,
           };
         }
         const message = error instanceof Error ? error.message : String(error);
-        const output = `Failed to call MCP tool "${target.exposedName}" on "${target.serverName}": ${message}`;
+        const output = `Failed to call external tool "${target.exposedName}" on "${target.serverName}": ${message}`;
         return { ok: false, message: await guardOutput(output, { error: message }) };
       }
     },
@@ -332,7 +332,7 @@ function toSdkToolDefinition(target: ToolTarget): Tool {
 function formatInputRequiredMessage(target: ToolTarget, result: InputRequiredResult): string {
   const methods = [...new Set(Object.values(result.inputRequests ?? {}).map((request) => request.method))];
   const requestSummary = methods.length > 0 ? ` (${methods.join(", ")})` : "";
-  return `MCP tool "${target.exposedName}" on "${target.serverName}" requires additional input${requestSummary}. Letta Code's public mod API does not provide an interactive input handler for a running tool call, so the call was not continued. No continuation state or unresolved result was retained.`;
+  return `External tool "${target.exposedName}" on "${target.serverName}" requires additional input${requestSummary}. Letta Code's public mod API does not provide an interactive input handler for a running tool call, so the call was not continued. No continuation state or unresolved result was retained.`;
 }
 
 function isUnsupportedTaskResult(error: unknown): boolean {

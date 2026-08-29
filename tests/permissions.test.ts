@@ -152,7 +152,7 @@ describe("split model-tool permission decisions", () => {
       args: { query: "adapter" },
     }), state)).toEqual({
       decision: "allow",
-      reason: 'MCP tool "github_search" is allowed by policy.',
+      reason: 'External tool "github_search" is allowed by policy.',
     });
   });
 
@@ -461,7 +461,7 @@ describe("permission overlay registration", () => {
 
     expect(registerMcpPermissions({ letta, runtime })).toBe(disposer);
     expect(letta.permissions.register).toHaveBeenCalledWith(expect.objectContaining({
-      id: "letta-mcp-adapter-permissions",
+      id: "letta-toolbox-permissions",
     }));
 
     await check?.(permissionEvent("search_tools", { query: "echo" }));

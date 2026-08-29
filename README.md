@@ -6,7 +6,7 @@ A Letta Code port of the `pi-mcp-adapter` pattern: a lazy, context-efficient MCP
 
 - `search_tools` for finding current MCP capabilities and their argument schemas.
 - `call_tool` for invoking a result using object-valued arguments.
-- A human `/lmcp` slash command for setup, status, cached tool listing, reconnects, and OAuth actions.
+- A human `/toolbox` slash command for setup, status, cached tool listing, reconnects, and OAuth actions.
 - Lazy MCP connections: activation reads local config/cache but does not start MCP server processes or perform HTTP MCP network work.
 - Transparent metadata refresh when search needs current information.
 - Aggregate output guarding with private spill files for oversized results.
@@ -105,13 +105,13 @@ Later files override earlier files for the same server names and settings. For p
 You can inspect the paths Letta sees with:
 
 ```text
-/lmcp setup
+/toolbox setup
 ```
 
 Create a starter project config with:
 
 ```text
-/lmcp setup create
+/toolbox setup create
 ```
 
 ## `.mcp.json` examples
@@ -134,7 +134,7 @@ Use stdio for local MCP servers launched as child processes:
 Then refresh metadata:
 
 ```text
-/lmcp reconnect filesystem
+/toolbox reconnect filesystem
 ```
 
 ### HTTP server with bearer auth
@@ -161,7 +161,7 @@ Prefer `bearerTokenEnv` over an inline token:
 Run Letta Code with `MCP_REMOTE_TOKEN` in the environment, then:
 
 ```text
-/lmcp reconnect remote
+/toolbox reconnect remote
 ```
 
 Streamable HTTP is the only HTTP transport. Omitting `transport`, using
@@ -216,31 +216,31 @@ identify this loopback-redirect client as a native application.
 Start login:
 
 ```text
-/lmcp auth-start linear
+/toolbox auth-start linear
 ```
 
 Open the returned authorization URL in a browser. After login, copy the full redirected URL and run:
 
 ```text
-/lmcp auth-complete linear <full redirected URL>
+/toolbox auth-complete linear <full redirected URL>
 ```
 
 Check local auth state:
 
 ```text
-/lmcp auth-status linear
+/toolbox auth-status linear
 ```
 
 Clear stored OAuth material:
 
 ```text
-/lmcp auth-clear linear
+/toolbox auth-clear linear
 ```
 
 Finally refresh metadata:
 
 ```text
-/lmcp reconnect linear
+/toolbox reconnect linear
 ```
 
 ### OAuth client credentials
@@ -271,13 +271,13 @@ metadata. `tokenUrl` is no longer required or used as the source of truth.
 Fetch and store a token:
 
 ```text
-/lmcp auth-start machine
+/toolbox auth-start machine
 ```
 
 Then refresh metadata:
 
 ```text
-/lmcp reconnect machine
+/toolbox reconnect machine
 ```
 
 ### Optional direct tools
@@ -354,7 +354,7 @@ resources, and direct-tool registration.
 Direct-tool workflow:
 
 1. Configure the server.
-2. Run `/lmcp reconnect <server>` to cache metadata.
+2. Run `/toolbox reconnect <server>` to cache metadata.
 3. Run `/reload` so Letta Code reactivates the mod and registers direct tools from the cache.
 
 `toolPrefix` controls names returned by `search_tools` and used for direct tools:
@@ -363,22 +363,22 @@ Direct-tool workflow:
 - `"short"`: strips a trailing `-mcp` from the server name before prefixing
 - `"none"`: uses original MCP tool names when they are valid and non-conflicting
 
-## `/lmcp` command reference
+## `/toolbox` command reference
 
 | Command | Purpose |
 | --- | --- |
-| `/lmcp` | Show MCP adapter status. |
-| `/lmcp status` | Same as `/lmcp`. Shows configured server/cache state and hints. |
-| `/lmcp tools` | List cached MCP tools and resource-backed synthetic tools. Does not connect. |
-| `/lmcp reconnect` | Connect to every configured server sequentially and refresh metadata cache. |
-| `/lmcp reconnect <server>` | Connect to one server and refresh its metadata cache. |
-| `/lmcp auth-start <server>` | Start OAuth login, or fetch a client-credentials token for that server. |
-| `/lmcp auth-complete <server> <redirectUrl>` | Complete authorization-code OAuth with a copied redirected URL. |
-| `/lmcp auth-status <server>` | Show whether local OAuth tokens/client info/pending auth/discovery state exist. |
-| `/lmcp auth-clear <server>` | Clear stored OAuth material for a server. |
-| `/lmcp setup` | Show config paths and an example `.mcp.json`. |
-| `/lmcp setup create` | Create a starter project `.mcp.json` if one does not already exist. |
-| `/lmcp help` | Show command usage. |
+| `/toolbox` | Show Toolbox status. |
+| `/toolbox status` | Same as `/toolbox`. Shows configured server/cache state and hints. |
+| `/toolbox tools` | List cached tools and resource-backed synthetic tools. Does not connect. |
+| `/toolbox reconnect` | Connect to every configured server sequentially and refresh metadata cache. |
+| `/toolbox reconnect <server>` | Connect to one server and refresh its metadata cache. |
+| `/toolbox auth-start <server>` | Start OAuth login, or fetch a client-credentials token for that server. |
+| `/toolbox auth-complete <server> <redirectUrl>` | Complete authorization-code OAuth with a copied redirected URL. |
+| `/toolbox auth-status <server>` | Show whether local OAuth tokens/client info/pending auth/discovery state exist. |
+| `/toolbox auth-clear <server>` | Clear stored OAuth material for a server. |
+| `/toolbox setup` | Show config paths and an example `.mcp.json`. |
+| `/toolbox setup create` | Create a starter project `.mcp.json` if one does not already exist. |
+| `/toolbox help` | Show command usage. |
 
 The command may open a short transient panel when Letta Code exposes panel UI support. Full details remain in command output.
 
@@ -421,7 +421,7 @@ Letta Code 0.31.5 does not expose an interactive form/input API to a running mod
 tool, so the adapter stops that call with a concise explanation rather than
 displaying or retaining opaque continuation state.
 
-Setup, status, explicit reconnects, and OAuth are intentionally human-facing `/lmcp` operations rather than model tool modes.
+Setup, status, explicit reconnects, and OAuth are intentionally human-facing `/toolbox` operations rather than model tool modes.
 
 ## Metadata cache behavior
 
@@ -433,7 +433,7 @@ The adapter persists tool/resource metadata and negotiated protocol discovery, b
 - Live `notifications/tools/list_changed` events invalidate the active disk entry. An unknown-tool or invalid-params call error refreshes the catalog without replaying the failed tool call.
 - Legacy servers without cache hints retain the adapter's seven-day fallback.
 
-The version 2 cache format is a clean replacement. Older cache files are ignored and rebuilt lazily; run `/lmcp reconnect` to rebuild immediately.
+The version 2 cache format is a clean replacement. Older cache files are ignored and rebuilt lazily; run `/toolbox reconnect` to rebuild immediately.
 
 ## Output guard and retained results
 
@@ -520,7 +520,7 @@ Notes:
 
 - `dangerousTools` controls dangerous-looking tool names and path arguments outside the working directory.
 - `unknownServers` controls model calls that cannot be attributed safely to configured metadata.
-- `configWrites` is reserved for future model-callable config-write operations; the current `/lmcp setup create` command is human-invoked.
+- `configWrites` is reserved for future model-callable config-write operations; the current `/toolbox setup create` command is human-invoked.
 
 Letta Code 0.31.5 does not expose the approval UI's selected persistence scope
 to permission mods and does not expose custom mod event emission. The adapter
@@ -530,9 +530,9 @@ the adapter does not broaden a one-time approval implicitly.
 
 ## UI and resources
 
-When Letta Code exposes status values, the mod registers a compact `mcp` status value that summarizes configured servers, cached tools, stale/missing cache, and warnings. Set `settings.ui.status` to `false` to disable this status value.
+When Letta Code exposes status values, the mod registers a compact `toolbox` status value that summarizes configured servers, cached tools, stale/missing cache, and warnings. Set `settings.ui.status` to `false` to disable this status value.
 
-MCP tool titles, annotations, output schemas, icons, and UI resource hints such as `_meta["openai/outputTemplate"]` / `_meta.uiResourceUri` are preserved in cached metadata. Titles, safety hints, and UI resources are surfaced by `search_tools` and `/lmcp tools`. Text resources returned from MCP calls are rendered in output; binary/blob resources are summarized rather than dumped.
+MCP tool titles, annotations, output schemas, icons, and UI resource hints such as `_meta["openai/outputTemplate"]` / `_meta.uiResourceUri` are preserved in cached metadata. Titles, safety hints, and UI resources are surfaced by `search_tools` and `/toolbox tools`. Text resources returned from MCP calls are rendered in output; binary/blob resources are summarized rather than dumped.
 
 ## Safety and limitations
 
