@@ -47,7 +47,9 @@ export interface ServerEntry {
   idleTimeout?: number;
   exposeResources?: boolean;
   directTools?: boolean | string[];
+  includeTools?: string[];
   excludeTools?: string[];
+  approveTools?: boolean | string[];
   debug?: boolean;
   [key: string]: unknown;
 }
@@ -63,6 +65,7 @@ export interface McpSettings {
   ui?: { status?: boolean; panels?: boolean; panelTTLms?: number };
   sampling?: { enabled?: boolean; mode?: "disabled" | "summary-only" | "conversation-fork"; alwaysAsk?: boolean; maxPromptChars?: number };
   elicitation?: { enabled?: boolean; form?: boolean; url?: boolean; alwaysAsk?: boolean; timeoutMs?: number };
+  approveTools?: boolean | string[];
   approval?: McpApprovalSettings;
   outputGuard?: McpOutputGuardSettings;
   [key: string]: unknown;

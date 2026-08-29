@@ -8,6 +8,7 @@ import {
   hasPathOutsideWorkingDirectory,
   normalizeApprovalSettings,
   registerMcpPermissions,
+  isToolCallApprovalRequired,
   type LettaPermissionEvent,
 } from "../src/features/permissions.js";
 import type { AdapterRuntime } from "../src/runtime.js";
@@ -204,7 +205,80 @@ describe("split model-tool permission decisions", () => {
     expect(decideMcpPermission(permissionEvent("call_tool", {
       name: "github_inspect",
       args: {},
-    }), annotated)?.decision).toBe("alwaysAsk");
+    }), annotated)?.decision).toBe("ask");
+  });
+
+  it("applies global approveTools globs before a read-only annotation", () => {
+    const configured = stateWith(
+      {
+        mcpServers: { github: definition },
+        settings: { approveTools: ["mcp/github.create_*"] },
+      },
+      cacheFor({
+        github: {
+          definition,
+          tools: [{ name: "create_issue", annotations: { readOnlyHint: true } }],
+        },
+      }),
+    );
+
+    expect(isToolCallApprovalRequired(configured, "github", "create_issue")).toBe(true);
+    expect(decideMcpPermission(permissionEvent("call_tool", {
+      name: "github_create_issue",
+      args: { title: "Milestone 5" },
+    }), configured)).toMatchObject({
+      decision: "ask",
+      reason: expect.stringContaining("approveTools"),
+    });
+  });
+
+  it("combines approval signals without weakening a stricter configured decision", () => {
+    const configuredDefinition: ServerEntry = { command: "node", approveTools: ["delete_*"] };
+    const configured = stateWith(
+      {
+        mcpServers: { github: configuredDefinition },
+        settings: { approval: { dangerousTools: "deny" } },
+      },
+      cacheFor({ github: { definition: configuredDefinition, tools: [{ name: "delete_repo" }] } }),
+    );
+
+    expect(decideMcpPermission(permissionEvent("call_tool", {
+      name: "github_delete_repo",
+      args: {},
+    }), configured)?.decision).toBe("deny");
+  });
+
+  it("does not let an allowed path policy bypass an explicit approveTools match", () => {
+    const configuredDefinition: ServerEntry = { command: "node", approveTools: ["inspect"] };
+    const configured = stateWith(
+      {
+        mcpServers: { github: configuredDefinition },
+        settings: { approval: { dangerousTools: "allow" } },
+      },
+      cacheFor({ github: { definition: configuredDefinition, tools: [{ name: "inspect" }] } }),
+    );
+
+    expect(decideMcpPermission(permissionEvent("call_tool", {
+      name: "github_inspect",
+      args: { path: "/etc/passwd" },
+    }), configured)?.decision).toBe("ask");
+  });
+
+  it("lets a server approveTools value override the global policy", () => {
+    const serverDefinition: ServerEntry = { command: "node", approveTools: [] };
+    const configured = stateWith(
+      {
+        mcpServers: { github: serverDefinition },
+        settings: { approveTools: true },
+      },
+      cacheFor({ github: { definition: serverDefinition, tools: [{ name: "search" }] } }),
+    );
+
+    expect(isToolCallApprovalRequired(configured, "github", "search")).toBe(false);
+    expect(decideMcpPermission(permissionEvent("call_tool", {
+      name: "github_search",
+      args: {},
+    }), configured)?.decision).toBe("allow");
   });
 
   it("does not let a read-only hint bypass path-boundary checks", () => {
@@ -292,7 +366,25 @@ describe("direct-tool permission decisions", () => {
     );
 
     expect(decideMcpPermission(permissionEvent("fixture_run_report", {}), state)?.decision).toBe("allow");
-    expect(decideMcpPermission(permissionEvent("fixture_inspect", {}), state)?.decision).toBe("alwaysAsk");
+    expect(decideMcpPermission(permissionEvent("fixture_inspect", {}), state)?.decision).toBe("ask");
+  });
+
+  it("applies approveTools consistently to direct tools", () => {
+    const definition: ServerEntry = { command: "node", directTools: true, approveTools: ["fixture__publish_*"] };
+    const state = stateWith(
+      { mcpServers: { fixture: definition } },
+      cacheFor({
+        fixture: {
+          definition,
+          tools: [{ name: "publish_report", annotations: { readOnlyHint: true } }],
+        },
+      }),
+    );
+
+    expect(decideMcpPermission(permissionEvent("fixture_publish_report", { id: 1 }), state)).toMatchObject({
+      decision: "ask",
+      reason: expect.stringContaining("approveTools"),
+    });
   });
 });
 
@@ -376,6 +468,28 @@ describe("permission overlay registration", () => {
     expect(runtime.loadState).toHaveBeenCalledWith({ cwd: "/tmp/workspace" });
     expect(runtime.connectAndRefresh).not.toHaveBeenCalled();
     expect(runtime.callTool).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for a direct tool removed from current metadata after registration", async () => {
+    let check: ((event: LettaPermissionEvent) => unknown) | undefined;
+    const runtime = fakeRuntime(state);
+    const registeredDirectToolNames = new Set<string>();
+    const letta = {
+      capabilities: { permissions: true },
+      permissions: {
+        register(definition: { check(event: LettaPermissionEvent): unknown }) {
+          check = definition.check;
+          return vi.fn();
+        },
+      },
+    };
+    registerMcpPermissions({ letta, runtime, directToolNames: registeredDirectToolNames });
+    registeredDirectToolNames.add("fixture_stale");
+
+    await expect(check?.(permissionEvent("fixture_stale", {}))).resolves.toMatchObject({
+      decision: "deny",
+      reason: expect.stringContaining("no longer present"),
+    });
   });
 
   it("fails closed when state loading fails", async () => {

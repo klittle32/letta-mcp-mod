@@ -194,6 +194,14 @@ describe("metadata cache", () => {
     expect(computeServerHash(base)).not.toBe(computeServerHash(changed));
   });
 
+  it("server hash changes when catalog filters change but not for approval policy", () => {
+    const base: ServerEntry = { command: "npx", args: ["server"] };
+
+    expect(computeServerHash(base)).not.toBe(computeServerHash({ ...base, includeTools: ["read_*"] }));
+    expect(computeServerHash(base)).not.toBe(computeServerHash({ ...base, excludeTools: ["delete_*"] }));
+    expect(computeServerHash(base)).toBe(computeServerHash({ ...base, approveTools: ["delete_*"] }));
+  });
+
   it("server hash does not change when runtime/direct fields change", () => {
     const base: ServerEntry = { command: "npx", args: ["server"] };
     const changed: ServerEntry = { ...base, lifecycle: "keep-alive", idleTimeout: 1, debug: true, directTools: true };
@@ -290,6 +298,25 @@ describe("metadata cache", () => {
     expect(metadata).toEqual([
       { name: "filesystem_read_file", originalName: "read_file", description: "Read file", inputSchema: { type: "object" } },
     ]);
+  });
+
+  it("reconstruct metadata includes selected tools and resources before applying exclusions", () => {
+    const metadata = reconstructToolMetadata(
+      "filesystem",
+      {
+        configHash: "x",
+        cachedAt: 1,
+        tools: [{ name: "read_file" }, { name: "read_secret" }, { name: "write_file" }],
+        resources: [{ name: "README", uri: "file:///README.md" }, { name: "Secrets", uri: "file:///secrets" }],
+      },
+      "server",
+      {
+        includeTools: ["read_*", "get_readme"],
+        excludeTools: ["*_secret", "get_secrets"],
+      },
+    );
+
+    expect(metadata.map((tool) => tool.originalName)).toEqual(["read_file", "get_readme"]);
   });
 
   it("reconstruct metadata preserves title, annotations, output schema, and icons", () => {

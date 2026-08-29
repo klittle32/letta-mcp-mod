@@ -178,7 +178,9 @@ interface ServerEntry {
 
   exposeResources?: boolean;
   directTools?: boolean | string[];
+  includeTools?: string[];
   excludeTools?: string[];
+  approveTools?: boolean | string[];
   debug?: boolean;
 }
 
@@ -224,6 +226,7 @@ interface McpSettings {
     alwaysAsk?: boolean;
     timeoutMs?: number;
   };
+  approveTools?: boolean | string[];
   approval?: {
     dangerousTools?: "allow" | "ask" | "alwaysAsk" | "deny";
     unknownServers?: "allow" | "ask" | "alwaysAsk" | "deny";

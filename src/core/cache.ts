@@ -7,7 +7,7 @@ import type { OAuthConfig, ServerEntry } from "./config.js";
 import { interpolateEnvRecord, interpolateEnvVars, resolveConfigPath } from "./config.js";
 import {
   formatToolName,
-  isToolExcluded,
+  isToolAllowed,
   resourceNameToToolName,
   type ToolMetadata,
   type ToolPrefixMode,
@@ -209,6 +209,7 @@ export function computeServerHash(
     bearerTokenEnv: definition.bearerTokenEnv,
     oauth: normalizeOAuthForHash(definition.oauth, env),
     exposeResources: definition.exposeResources,
+    includeTools: definition.includeTools,
     excludeTools: definition.excludeTools,
   };
 
@@ -248,14 +249,14 @@ export function reconstructToolMetadata(
   serverName: string,
   entry: ServerCacheEntry | undefined,
   prefix: ToolPrefixMode,
-  definition: Pick<ServerEntry, "excludeTools" | "exposeResources">,
+  definition: Pick<ServerEntry, "excludeTools" | "exposeResources" | "includeTools">,
 ): ToolMetadata[] {
   if (!entry) return [];
 
   const metadata: ToolMetadata[] = [];
   for (const tool of entry.tools ?? []) {
     if (!tool?.name) continue;
-    if (isToolExcluded(tool.name, serverName, prefix, definition.excludeTools)) continue;
+    if (!isToolAllowed(tool.name, serverName, prefix, definition.includeTools, definition.excludeTools)) continue;
     metadata.push({
       name: formatToolName(tool.name, serverName, prefix),
       originalName: tool.name,
@@ -274,7 +275,7 @@ export function reconstructToolMetadata(
     for (const resource of entry.resources ?? []) {
       if (!resource?.name || !resource.uri) continue;
       const originalName = `get_${resourceNameToToolName(resource.name)}`;
-      if (isToolExcluded(originalName, serverName, prefix, definition.excludeTools)) continue;
+      if (!isToolAllowed(originalName, serverName, prefix, definition.includeTools, definition.excludeTools)) continue;
       metadata.push({
         name: formatToolName(originalName, serverName, prefix),
         originalName,

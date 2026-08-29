@@ -352,11 +352,18 @@ describe("cached direct tool registration", () => {
       tools: { register: vi.fn((tool: LettaToolDefinition) => { registered.push(tool); return disposers[registered.length - 1] ?? vi.fn(); }) },
       diagnostics: { report: vi.fn() },
     } satisfies LettaModApi;
+    const registeredNames = new Set<string>();
 
-    const returned = registerCachedDirectTools({ letta, runtime, activationCwd: "/tmp/activation" });
+    const returned = registerCachedDirectTools({
+      letta,
+      runtime,
+      activationCwd: "/tmp/activation",
+      registeredNames,
+    });
 
     expect(runtime.loadState).toHaveBeenCalledWith({ cwd: "/tmp/activation" });
     expect(registered.map((tool) => tool.name)).toEqual(["fixture_echo"]);
+    expect(registeredNames).toEqual(new Set(["fixture_echo"]));
     expect(returned).toEqual(disposers);
     expect(runtime.connectAndRefresh).not.toHaveBeenCalled();
     expect(runtime.callTool).not.toHaveBeenCalled();
@@ -396,8 +403,15 @@ describe("cached direct tool registration", () => {
       tools: { register: vi.fn(() => { throw new Error("collision"); }) },
       diagnostics: { report: vi.fn() },
     } satisfies LettaModApi;
+    const registeredNames = new Set<string>();
 
-    expect(() => registerCachedDirectTools({ letta, runtime, activationCwd: "/tmp/activation" })).not.toThrow();
+    expect(() => registerCachedDirectTools({
+      letta,
+      runtime,
+      activationCwd: "/tmp/activation",
+      registeredNames,
+    })).not.toThrow();
+    expect(registeredNames).toEqual(new Set());
     expect(letta.diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ severity: "warning", message: expect.stringContaining('Direct tools for "stale"') }));
     expect(letta.diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({ severity: "warning", message: expect.stringContaining("Failed to register direct MCP tool") }));
   });

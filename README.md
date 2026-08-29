@@ -319,6 +319,25 @@ Allow-list specific direct tools:
 }
 ```
 
+Filter a noisy server's catalog with glob selectors:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "includeTools": ["search_*", "get_*", "create_issue"],
+      "excludeTools": ["get_*_secret"]
+    }
+  }
+}
+```
+
+`includeTools` filters first; `excludeTools` then removes matches and wins on
+overlap. The same filtered catalog is used by search, describe, `call_tool`,
+resources, and direct-tool registration.
+
 Direct-tool workflow:
 
 1. Configure the server.
@@ -436,27 +455,44 @@ Default behavior:
 - Tool search is allowed.
 - Known tool calls are allowed unless they look risky.
 - Tools marked `readOnlyHint: true` by the MCP server are allowed without the name heuristic, subject to the independent path-boundary check.
-- Tools marked `destructiveHint: true` always ask.
+- Tools marked `destructiveHint: true` ask.
+- Tools matched by `approveTools` ask even if the server marks them read-only.
 - An uncached call attributable to a configured server asks before lazy connection; an ambiguous unknown target is denied.
 - Tool names containing words like `delete`, `write`, `update`, `exec`, `run`, `shell`, or `browser` ask by default.
 - Tool arguments with path-like keys (`path`, `file`, `dir`, `cwd`, `target`, `destination`, etc.) ask if they resolve outside the current working directory.
 - Direct tools use the same risk checks as `call_tool`.
-- If a risky call was approved in the approval phase but reaches execution with changed args, it is denied.
+- A human approval authorizes one execution with that tool-call ID and exact argument payload. Reuse or changed arguments are denied.
 
-Tune permission defaults with `settings.approval`:
+Require approval for selected tools globally or per server:
 
 ```json
 {
   "settings": {
+    "approveTools": ["mcp/github.create_*", "filesystem__write_*"],
     "approval": {
       "dangerousTools": "ask",
       "unknownServers": "deny",
       "configWrites": "alwaysAsk"
     }
   },
-  "mcpServers": {}
+  "mcpServers": {
+    "database": {
+      "command": "database-mcp",
+      "approveTools": true
+    },
+    "readonly": {
+      "command": "readonly-mcp",
+      "approveTools": []
+    }
+  }
 }
 ```
+
+Per-server `approveTools` overrides the global value. `true` matches every tool;
+`false` or an empty array matches none. String selectors support `*` and `?`
+and can use original names (`create_issue`), exposed names
+(`github_create_issue`), the `server__tool` form from the issue, or canonical
+keys such as `mcp/github.create_issue`.
 
 Valid decisions are `allow`, `ask`, `alwaysAsk`, and `deny`.
 
@@ -465,6 +501,12 @@ Notes:
 - `dangerousTools` controls dangerous-looking tool names and path arguments outside the working directory.
 - `unknownServers` controls model calls that cannot be attributed safely to configured metadata.
 - `configWrites` is reserved for future model-callable config-write operations; the current `/lmcp setup create` command is human-invoked.
+
+Letta Code 0.31.5 does not expose the approval UI's selected persistence scope
+to permission mods and does not expose custom mod event emission. The adapter
+therefore enforces exact-argument, once-only approvals. Session grants and a
+claimable cross-mod approval-broker event require a future public Letta host API;
+the adapter does not broaden a one-time approval implicitly.
 
 ## UI and resources
 

@@ -1,6 +1,12 @@
 import path from "node:path";
 import type { ApprovalDecision, McpApprovalSettings } from "../core/config.js";
-import { findToolByName, normalizeToolName, type ToolMetadata } from "../core/tool-names.js";
+import {
+  findToolByName,
+  getToolNameCandidates,
+  matchesToolPattern,
+  normalizeToolName,
+  type ToolMetadata,
+} from "../core/tool-names.js";
 import type { AdapterRuntime } from "../runtime.js";
 import { collectDirectToolDescriptors, type DirectToolDescriptor } from "./direct-tools.js";
 import type { ProxyState } from "./tool-catalog.js";
@@ -109,7 +115,9 @@ export function registerMcpPermissions(options: {
   if (!letta.capabilities?.permissions || !letta.permissions) return undefined;
 
   const tracker = new ApprovalTracker();
-  const directToolNames = options.directToolNames ? new Set(options.directToolNames) : undefined;
+  const directToolNames = options.directToolNames instanceof Set
+    ? options.directToolNames
+    : options.directToolNames ? new Set(options.directToolNames) : undefined;
   return letta.permissions.register({
     id: "letta-mcp-adapter-permissions",
     description: "Apply MCP adapter safety policy to catalog and direct MCP tool calls.",
@@ -194,23 +202,16 @@ function decideDirectToolCall(
     return undefined;
   }
 
-  if (descriptor.annotations?.destructiveHint === true) {
-    return { decision: "alwaysAsk", reason: `MCP direct tool "${event.toolName}" is marked destructive by the server.` };
-  }
-
-  if (hasPathOutsideWorkingDirectory(event.args, event.cwd || event.workingDirectory)) {
-    return { decision: approval.dangerousTools, reason: `MCP direct tool "${event.toolName}" uses a path outside the working directory.` };
-  }
-
-  if (descriptor.annotations?.readOnlyHint === true) {
-    return { decision: "allow", reason: `MCP direct tool "${event.toolName}" is marked read-only by the server.` };
-  }
-
-  if (isDangerousDirectTool(descriptor)) {
-    return { decision: approval.dangerousTools, reason: `MCP direct tool "${event.toolName}" is potentially dangerous.` };
-  }
-
-  return { decision: "allow", reason: `MCP direct tool "${event.toolName}" is allowed by policy.` };
+  return decideResolvedTool({
+    displayName: event.toolName,
+    kind: "direct tool",
+    args: event.args,
+    cwd: event.cwd || event.workingDirectory,
+    approval,
+    requiresApproval: isToolCallApprovalRequired(state, descriptor.serverName, descriptor.originalName),
+    annotations: descriptor.annotations,
+    dangerousName: isDangerousDirectTool(descriptor),
+  });
 }
 
 function isDangerousDirectTool(descriptor: DirectToolDescriptor): boolean {
@@ -234,23 +235,81 @@ function decideCallTool(
     return { decision: "ask", reason: `MCP tool "${toolName}" needs a metadata refresh from configured server "${serverHint}" before execution.` };
   }
 
-  if (resolution.tool.annotations?.destructiveHint === true) {
-    return { decision: "alwaysAsk", reason: `MCP tool "${toolName}" is marked destructive by the server.` };
+  return decideResolvedTool({
+    displayName: toolName,
+    kind: "tool",
+    args: toolArgs,
+    cwd: event.cwd || event.workingDirectory,
+    approval,
+    requiresApproval: isToolCallApprovalRequired(state, resolution.serverName, resolution.tool.originalName),
+    annotations: resolution.tool.annotations,
+    dangerousName: isDangerousToolName(resolution.tool.name) || isDangerousToolName(resolution.tool.originalName),
+  });
+}
+
+function decideResolvedTool(options: {
+  displayName: string;
+  kind: "tool" | "direct tool";
+  args: Record<string, unknown>;
+  cwd: string;
+  approval: Required<McpApprovalSettings>;
+  requiresApproval: boolean;
+  annotations?: ToolMetadata["annotations"];
+  dangerousName: boolean;
+}): PermissionCheckResult {
+  const label = `MCP ${options.kind} "${options.displayName}"`;
+  const candidates: PermissionCheckResult[] = [];
+  if (hasPathOutsideWorkingDirectory(options.args, options.cwd)) {
+    candidates.push({
+      decision: options.approval.dangerousTools,
+      reason: `${label} uses a path outside the working directory.`,
+    });
+  }
+  if (options.requiresApproval) {
+    candidates.push({ decision: "ask", reason: `${label} matches approveTools policy.` });
+  }
+  if (options.annotations?.destructiveHint === true) {
+    candidates.push({ decision: "ask", reason: `${label} is marked destructive by the server.` });
+  }
+  if (options.annotations?.readOnlyHint !== true && options.dangerousName) {
+    candidates.push({
+      decision: options.approval.dangerousTools,
+      reason: `${label} is potentially dangerous.`,
+    });
   }
 
-  if (hasPathOutsideWorkingDirectory(toolArgs, event.cwd || event.workingDirectory)) {
-    return { decision: approval.dangerousTools, reason: `MCP tool "${toolName}" uses a path outside the working directory.` };
+  const strictest = candidates.sort((left, right) => (
+    permissionDecisionWeight(right.decision) - permissionDecisionWeight(left.decision)
+  ))[0];
+  if (strictest) return strictest;
+  if (options.annotations?.readOnlyHint === true) {
+    return { decision: "allow", reason: `${label} is marked read-only by the server.` };
   }
+  return { decision: "allow", reason: `${label} is allowed by policy.` };
+}
 
-  if (resolution.tool.annotations?.readOnlyHint === true) {
-    return { decision: "allow", reason: `MCP tool "${toolName}" is marked read-only by the server.` };
-  }
+function permissionDecisionWeight(decision: PermissionDecision): number {
+  if (decision === "deny") return 3;
+  if (decision === "alwaysAsk") return 2;
+  if (decision === "ask") return 1;
+  return 0;
+}
 
-  if (isDangerousToolName(resolution.tool.name) || isDangerousToolName(resolution.tool.originalName)) {
-    return { decision: approval.dangerousTools, reason: `MCP tool "${toolName}" is potentially dangerous.` };
-  }
-
-  return { decision: "allow", reason: `MCP tool "${toolName}" is allowed by policy.` };
+export function isToolCallApprovalRequired(
+  state: ProxyState,
+  serverName: string,
+  originalToolName: string,
+): boolean {
+  const definition = state.config.mcpServers[serverName];
+  const configured = definition?.approveTools !== undefined
+    ? definition.approveTools
+    : state.config.settings?.approveTools;
+  if (configured === true) return true;
+  if (!Array.isArray(configured) || configured.length === 0) return false;
+  return matchesToolPattern(
+    getToolNameCandidates(originalToolName, serverName, state.prefix),
+    configured,
+  );
 }
 
 type ToolResolution =

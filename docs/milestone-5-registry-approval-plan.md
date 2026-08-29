@@ -87,14 +87,18 @@ dependencies. They are done only when Letta exposes either:
 
 ### Approval precedence
 
-For a resolved tool:
+For a resolved tool, path-boundary policy, explicit `approveTools`, destructive
+annotations, and (unless read-only) the dangerous-name fallback are evaluated
+together. The strictest result wins in this order:
+`deny > alwaysAsk > ask > allow`. This prevents one signal from accidentally
+weakening another.
 
-1. Path-boundary policy still applies; metadata cannot weaken it.
-2. An explicit `approveTools` match asks.
-3. `destructiveHint: true` asks.
-4. `readOnlyHint: true` allows.
-5. The existing dangerous-name fallback follows `approval.dangerousTools`.
-6. Other tools allow.
+- An explicit `approveTools` match asks.
+- `destructiveHint: true` asks.
+- `readOnlyHint: true` disables only the dangerous-name heuristic; it cannot
+  bypass path or explicit approval policy.
+- The dangerous-name and path policies follow `approval.dangerousTools`.
+- A tool with no applicable risk signal is allowed.
 
 An unresolved but attributable tool still asks for metadata refresh. An
 unattributable tool still follows the existing fail-closed behavior.

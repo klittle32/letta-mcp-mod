@@ -66,8 +66,13 @@ export default function activate(
 ): (() => Promise<void>) | undefined {
   const disposers: Array<() => void> = [];
   const activationCwd = options.activationCwd ?? process.cwd();
+  const registeredDirectToolNames = new Set<string>();
 
-  const disposePermissions = registerMcpPermissions({ letta, runtime });
+  const disposePermissions = registerMcpPermissions({
+    letta,
+    runtime,
+    directToolNames: registeredDirectToolNames,
+  });
   if (disposePermissions) disposers.push(disposePermissions);
 
   disposers.push(...registerMcpStatusValues({ letta, runtime, activationCwd }));
@@ -75,7 +80,12 @@ export default function activate(
   if (letta.capabilities?.tools && letta.tools) {
     disposers.push(letta.tools.register(createSearchToolsTool(runtime)));
     disposers.push(letta.tools.register(createCallToolTool(runtime)));
-    disposers.push(...registerCachedDirectTools({ letta, runtime, activationCwd }));
+    disposers.push(...registerCachedDirectTools({
+      letta,
+      runtime,
+      activationCwd,
+      registeredNames: registeredDirectToolNames,
+    }));
   }
 
   if (letta.capabilities?.commands && letta.commands) {

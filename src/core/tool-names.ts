@@ -45,22 +45,61 @@ export function findToolByName(metadata: ToolMetadata[] | undefined, requestedNa
   return metadata.find((tool) => normalizeToolName(tool.name) === normalized);
 }
 
+export function getToolNameCandidates(
+  toolName: string,
+  serverName: string,
+  prefix: ToolPrefixMode,
+): Set<string> {
+  const normalizedTool = normalizeToolName(toolName);
+  const normalizedServer = normalizeToolName(serverName);
+  return new Set([
+    normalizedTool,
+    normalizeToolName(formatToolName(toolName, serverName, prefix)),
+    normalizeToolName(formatToolName(toolName, serverName, "server")),
+    normalizeToolName(formatToolName(toolName, serverName, "short")),
+    `${normalizedServer}__${normalizedTool}`,
+    `mcp/${normalizedServer}.${normalizedTool}`,
+  ]);
+}
+
+export function matchesToolPattern(candidates: Iterable<string>, patterns?: unknown): boolean {
+  if (!Array.isArray(patterns) || patterns.length === 0) return false;
+  const normalizedCandidates = [...candidates].map(normalizeToolName);
+  return patterns.some((pattern) => {
+    if (typeof pattern !== "string") return false;
+    const matcher = globToRegExp(normalizeToolName(pattern));
+    return normalizedCandidates.some((candidate) => matcher.test(candidate));
+  });
+}
+
+export function isToolIncluded(
+  toolName: string,
+  serverName: string,
+  prefix: ToolPrefixMode,
+  includeTools?: unknown,
+): boolean {
+  if (!Array.isArray(includeTools) || includeTools.length === 0) return true;
+  return matchesToolPattern(getToolNameCandidates(toolName, serverName, prefix), includeTools);
+}
+
 export function isToolExcluded(
   toolName: string,
   serverName: string,
   prefix: ToolPrefixMode,
   excludeTools?: unknown,
 ): boolean {
-  if (!Array.isArray(excludeTools) || excludeTools.length === 0) return false;
+  return matchesToolPattern(getToolNameCandidates(toolName, serverName, prefix), excludeTools);
+}
 
-  const candidates = new Set([
-    normalizeToolName(toolName),
-    normalizeToolName(formatToolName(toolName, serverName, prefix)),
-    normalizeToolName(formatToolName(toolName, serverName, "server")),
-    normalizeToolName(formatToolName(toolName, serverName, "short")),
-  ]);
-
-  return excludeTools.some((excluded) => typeof excluded === "string" && candidates.has(normalizeToolName(excluded)));
+export function isToolAllowed(
+  toolName: string,
+  serverName: string,
+  prefix: ToolPrefixMode,
+  includeTools?: unknown,
+  excludeTools?: unknown,
+): boolean {
+  return isToolIncluded(toolName, serverName, prefix, includeTools)
+    && !isToolExcluded(toolName, serverName, prefix, excludeTools);
 }
 
 export function resourceNameToToolName(name: string): string {
@@ -71,4 +110,18 @@ export function resourceNameToToolName(name: string): string {
     .replace(/^_+|_+$/g, "")
     .replace(/_+/g, "_");
   return normalized || "resource";
+}
+
+function globToRegExp(pattern: string): RegExp {
+  let source = "^";
+  for (const character of pattern) {
+    if (character === "*") {
+      source += ".*";
+    } else if (character === "?") {
+      source += ".";
+    } else {
+      source += character.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+    }
+  }
+  return new RegExp(`${source}$`);
 }

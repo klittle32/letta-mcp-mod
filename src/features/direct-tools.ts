@@ -83,6 +83,7 @@ export function registerCachedDirectTools(options: {
   letta: LettaModApi;
   runtime: AdapterRuntime;
   activationCwd: string;
+  registeredNames?: Set<string>;
 }): Array<() => void> {
   const { letta, runtime, activationCwd } = options;
   if (!letta.capabilities?.tools || !letta.tools) return [];
@@ -104,6 +105,7 @@ export function registerCachedDirectTools(options: {
   for (const descriptor of collection.descriptors) {
     try {
       disposers.push(letta.tools.register(createDirectMcpTool(descriptor, runtime)));
+      options.registeredNames?.add(descriptor.name);
     } catch (error) {
       reportWarning(
         letta,

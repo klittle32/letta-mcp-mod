@@ -3,7 +3,10 @@ import {
   findToolByName,
   formatToolName,
   getServerPrefix,
+  getToolNameCandidates,
+  isToolAllowed,
   isToolExcluded,
+  matchesToolPattern,
   normalizeToolName,
   resourceNameToToolName,
   type ToolMetadata,
@@ -50,6 +53,29 @@ describe("tool naming", () => {
   it("excludeTools matches prefixed name", () => {
     expect(isToolExcluded("read_file", "filesystem", "server", ["filesystem_read_file"])).toBe(true);
     expect(isToolExcluded("read_file", "foo-mcp", "short", ["foo_read_file"])).toBe(true);
+  });
+
+  it("selectors match globs across original, exposed, issue, and canonical names", () => {
+    const candidates = getToolNameCandidates("create-issue", "github-mcp", "short");
+
+    expect(matchesToolPattern(candidates, ["create_*"])).toBe(true);
+    expect(matchesToolPattern(candidates, ["github_create_issue"])).toBe(true);
+    expect(matchesToolPattern(candidates, ["github_mcp__create_*"])).toBe(true);
+    expect(matchesToolPattern(candidates, ["mcp/github_mcp.create_?ssue"])).toBe(true);
+    expect(matchesToolPattern(candidates, ["gitlab_*"])).toBe(false);
+  });
+
+  it("treats non-glob pattern characters literally", () => {
+    const candidates = ["mcp/github.create_issue"];
+
+    expect(matchesToolPattern(candidates, ["mcp/github.create_*"])).toBe(true);
+    expect(matchesToolPattern(candidates, ["mcp/githubXcreate_*"])).toBe(false);
+  });
+
+  it("applies includeTools before excludeTools with exclusion winning", () => {
+    expect(isToolAllowed("read_file", "filesystem", "server", ["read_*"], [])).toBe(true);
+    expect(isToolAllowed("write_file", "filesystem", "server", ["read_*"], [])).toBe(false);
+    expect(isToolAllowed("read_secret", "filesystem", "server", ["read_*"], ["*_secret"])).toBe(false);
   });
 
   it("resource names become safe synthetic tool names", () => {
