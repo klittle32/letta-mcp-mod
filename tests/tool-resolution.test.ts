@@ -19,11 +19,13 @@ function stateWithCache(options: {
     },
     settings: { toolPrefix: "server" },
   };
-  let cache = options.cache ?? { version: 1 as const, servers: {} };
+  let cache = options.cache ?? { version: 2 as const, servers: {} };
   cache = updateServerCache({
     cache,
     serverName: "fixture",
     definition: config.mcpServers.fixture,
+    identityHash: "fixture",
+    cacheScope: "public",
     now: options.now ?? 1000,
     tools: [
       { name: "echo", description: "Echo", inputSchema: { type: "object" } },
@@ -36,6 +38,8 @@ function stateWithCache(options: {
       cache,
       serverName: "other",
       definition: config.mcpServers.other,
+      identityHash: "other",
+      cacheScope: "public",
       now: options.now ?? 1000,
       tools: [{ name: "shared", description: "Other shared", inputSchema: { type: "object" } }],
       resources: [],

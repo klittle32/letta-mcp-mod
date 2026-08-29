@@ -20,6 +20,7 @@ export interface ConnectOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   prior?: PriorDiscovery;
+  onToolsChanged?: () => void;
 }
 
 export type McpTransportKind = "stdio" | "streamable-http";
@@ -113,7 +114,7 @@ export class McpServerManager {
     options: ConnectOptions,
     oauthProvider: ReturnType<typeof createOAuthProvider> | undefined,
   ): Promise<McpConnection> {
-    const client = createClient(definition);
+    const client = createClient(definition, options);
     const transport = new StreamableHTTPClientTransport(url, {
       requestInit: { headers },
       authProvider: oauthProvider,
@@ -137,7 +138,7 @@ export class McpServerManager {
   private async createStdioConnection(serverName: string, definition: ServerEntry, options: ConnectOptions): Promise<McpConnection> {
     if (options.signal?.aborted) throw new Error(`Failed to connect to "${serverName}": request was aborted.`);
 
-    const client = createClient(definition);
+    const client = createClient(definition, options);
     const transport = new StdioClientTransport({
       command: definition.command!,
       args: definition.args ?? [],
@@ -162,12 +163,23 @@ export class McpServerManager {
   }
 }
 
-function createClient(definition: ServerEntry): Client {
+function createClient(definition: ServerEntry, options: Pick<ConnectOptions, "onToolsChanged">): Client {
   return new Client(
     { name: "letta-mcp-adapter", version: "0.1.0" },
     {
       capabilities: {},
       listMaxPages: 10,
+      listChanged: options.onToolsChanged
+        ? {
+            tools: {
+              autoRefresh: false,
+              debounceMs: 0,
+              onChanged(error) {
+                if (!error) options.onToolsChanged?.();
+              },
+            },
+          }
+        : undefined,
       versionNegotiation: { mode: resolveVersionNegotiationMode(definition.protocolVersion) },
     },
   );

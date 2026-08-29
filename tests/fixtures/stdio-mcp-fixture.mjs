@@ -1,13 +1,16 @@
-import { Server } from "@modelcontextprotocol/server";
+import { ProtocolError, ProtocolErrorCode, Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { appendFileSync } from "node:fs";
 
 const server = new Server(
   { name: "letta-mcp-fixture", version: "1.0.0" },
-  { capabilities: { tools: {}, resources: {} } },
+  { capabilities: { tools: { listChanged: true }, resources: {} } },
 );
 
-server.setRequestHandler("tools/list", async () => ({
-  tools: [
+server.setRequestHandler("tools/list", async () => {
+  recordEvent("TOOLS_LIST_COUNT_FILE");
+  return {
+    tools: [
     {
       name: "echo",
       description: "Echo a message",
@@ -38,7 +41,8 @@ server.setRequestHandler("tools/list", async () => ({
       inputSchema: { type: "object", properties: {} },
     },
   ],
-}));
+  };
+});
 
 server.setRequestHandler("resources/list", async () => ({
   resources: [
@@ -72,6 +76,7 @@ server.setRequestHandler("tools/call", async (request) => {
     return { content: [{ type: "text", text: String(request.params.arguments?.message ?? "") }] };
   }
   if (request.params.name === "list_items") {
+    if (process.env.NOTIFY_LIST_CHANGED === "1") await server.sendToolListChanged();
     return { content: [{ type: "text", text: "alpha\nbeta\ngamma" }] };
   }
   if (request.params.name === "structured_status") {
@@ -84,6 +89,10 @@ server.setRequestHandler("tools/call", async (request) => {
     return { isError: true, content: [{ type: "text", text: String(request.params.arguments?.message ?? "fixture failure") }] };
   }
   if (request.params.name === "throw_error") {
+    recordEvent("TOOLS_CALL_COUNT_FILE");
+    if (process.env.STALE_CATALOG_ERROR === "1") {
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Unknown tool: throw_error");
+    }
     throw new Error("fixture thrown failure");
   }
   throw new Error(`Unknown tool: ${request.params.name}`);
@@ -91,3 +100,8 @@ server.setRequestHandler("tools/call", async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+function recordEvent(envName) {
+  const path = process.env[envName];
+  if (path) appendFileSync(path, "1\n");
+}

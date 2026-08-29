@@ -67,7 +67,7 @@ describe("adapter runtime OAuth integration", () => {
 
       const refreshed = await runtime.connectAndRefresh({ cwd }, "remote");
       expect(refreshed.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen"]);
-      expect(loadMetadataCache({ home })?.servers.remote.cachedAt).toBe(1234);
+      expect(refreshed.state.servers.get("remote")?.cacheEntry?.cachedAt).toBe(1234);
 
       const cachedState = runtime.loadState({ cwd });
       expect(cachedState.servers.get("remote")?.tools.map((tool) => tool.name)).toContain("remote_echo");
@@ -91,9 +91,8 @@ describe("adapter runtime OAuth integration", () => {
       await executeMcpCommand("auth-start remote", runtime, { cwd });
       const redirectUrl = await fixture.authorize(loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })!.authorizationUrl!);
       await executeMcpCommand(`auth-complete remote ${redirectUrl}`, runtime, { cwd });
-      await runtime.connectAndRefresh({ cwd }, "remote");
-      const cache = loadMetadataCache({ home })!;
-      expect(cache.servers.remote.configHash).toBe(computeServerHash({ url: fixture.url, auth: "oauth", oauth: { clientId: "client-id", clientSecret: "client-secret-test-value", redirectUri: fixture.redirectUri, scope: "read" } }));
+      const refreshed = await runtime.connectAndRefresh({ cwd }, "remote");
+      expect(refreshed.state.servers.get("remote")?.cacheEntry?.configHash).toBe(computeServerHash({ url: fixture.url, auth: "oauth", oauth: { clientId: "client-id", clientSecret: "client-secret-test-value", redirectUri: fixture.redirectUri, scope: "read" } }));
 
       writeConfig(cwd, fixture, { scope: "write" });
       const stale = runtime.loadState({ cwd }).servers.get("remote");

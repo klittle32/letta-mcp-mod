@@ -24,24 +24,44 @@ const stats = {
 function createFixtureServer(req) {
   const server = new Server(
     { name: "letta-http-streamable-fixture", version: "1.0.0" },
-    { capabilities: { tools: {}, resources: {} } },
+    {
+      capabilities: { tools: {}, resources: {} },
+      cacheHints: {
+        "server/discover": { ttlMs: 60_000, cacheScope: "private" },
+        "tools/list": { ttlMs: 60_000, cacheScope: "private" },
+        "resources/list": { ttlMs: 60_000, cacheScope: "private" },
+      },
+    },
   );
 
   server.setRequestHandler("tools/list", async (request) => {
     const tools = [
       {
         name: "echo",
+        title: "HTTP Echo",
         description: "Echo a message over HTTP",
         inputSchema: {
           type: "object",
           properties: { message: { type: "string", description: "Message to echo" } },
           required: ["message"],
         },
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        icons: [{ src: "https://example.test/echo.svg", mimeType: "image/svg+xml" }],
       },
       {
         name: "headers_seen",
         description: "Report selected request headers",
-        inputSchema: { type: "object", properties: {} },
+        inputSchema: {
+          type: "object",
+          properties: {
+            trace: { type: "string", "x-mcp-header": "trace" },
+          },
+        },
       },
       {
         name: "fail_soft",
@@ -83,6 +103,7 @@ function createFixtureServer(req) {
       return { content: [{ type: "text", text: JSON.stringify({
         authorization: req.headers.get("authorization") ? "present" : "missing",
         fixture: req.headers.get("x-fixture-header") ?? "missing",
+        param: req.headers.get("mcp-param-trace") ?? "missing",
       }) }] };
     }
     if (request.params.name === "fail_soft") {

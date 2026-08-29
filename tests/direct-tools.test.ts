@@ -10,15 +10,19 @@ function cacheFor(
   entries: Record<string, { definition: ServerEntry; tools?: CachedTool[]; resources?: CachedResource[]; configHash?: string }>,
 ): MetadataCache {
   return {
-    version: 1,
+    version: 2,
     servers: Object.fromEntries(
       Object.entries(entries).map(([serverName, entry]) => [
         serverName,
         {
-          configHash: entry.configHash ?? computeServerHash(entry.definition),
-          cachedAt: 1_000,
-          tools: entry.tools ?? [{ name: "echo", description: "Echo text", inputSchema: { type: "object", properties: { message: { type: "string" } } } }],
-          resources: entry.resources ?? [],
+          public: {
+            configHash: entry.configHash ?? computeServerHash(entry.definition),
+            cachedAt: 1_000,
+            cacheScope: "public",
+            tools: entry.tools ?? [{ name: "echo", description: "Echo text", inputSchema: { type: "object", properties: { message: { type: "string" } } } }],
+            resources: entry.resources ?? [],
+          },
+          private: {},
         },
       ]),
     ),
@@ -26,7 +30,7 @@ function cacheFor(
 }
 
 function stateWith(config: McpConfig, cache?: MetadataCache): ProxyState {
-  return createProxyState({ config, cache: cache ?? { version: 1, servers: {} }, now: 1_000 });
+  return createProxyState({ config, cache: cache ?? { version: 2, servers: {} }, now: 1_000 });
 }
 
 function collect(config: McpConfig, cache?: MetadataCache) {

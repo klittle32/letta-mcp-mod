@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { DiscoverResult } from "@modelcontextprotocol/client";
+import type { DiscoverResult, Icon, ToolAnnotations } from "@modelcontextprotocol/client";
 import type { OAuthConfig, ServerEntry } from "./config.js";
 import { interpolateEnvRecord, interpolateEnvVars, resolveConfigPath } from "./config.js";
 import {
@@ -16,8 +16,12 @@ import {
 
 export interface CachedTool {
   name: string;
+  title?: string;
   description?: string;
   inputSchema?: unknown;
+  outputSchema?: unknown;
+  annotations?: ToolAnnotations;
+  icons?: Icon[];
   uiResourceUri?: string;
   uiStreamMode?: UiStreamMode;
 }
@@ -37,12 +41,22 @@ export interface ServerCacheEntry {
   tools: CachedTool[];
   resources: CachedResource[];
   cachedAt: number;
+  ttlMs?: number;
+  cacheScope?: CacheScope;
+  warnings?: string[];
   protocol?: CachedProtocolNegotiation;
 }
 
+export type CacheScope = "public" | "private";
+
+export interface ServerCacheBucket {
+  public?: ServerCacheEntry;
+  private: Record<string, ServerCacheEntry>;
+}
+
 export interface MetadataCache {
-  version: 1;
-  servers: Record<string, ServerCacheEntry>;
+  version: 2;
+  servers: Record<string, ServerCacheBucket>;
 }
 
 export interface CacheLoadOptions {
@@ -55,7 +69,7 @@ export function getMetadataCachePath(home = homedir()): string {
 }
 
 export function emptyMetadataCache(): MetadataCache {
-  return { version: 1, servers: {} };
+  return { version: 2, servers: {} };
 }
 
 export function loadMetadataCache(options: CacheLoadOptions = {}): MetadataCache | null {
@@ -88,24 +102,37 @@ export function updateServerCache(options: {
   cache: MetadataCache;
   serverName: string;
   definition: ServerEntry;
+  identityHash: string;
   tools: CachedTool[];
   resources: CachedResource[];
+  ttlMs?: number;
+  cacheScope?: CacheScope;
+  warnings?: string[];
   protocol?: CachedProtocolNegotiation;
   now?: number;
   home?: string;
   env?: Record<string, string | undefined>;
 }): MetadataCache {
+  const cacheScope = options.cacheScope ?? "private";
+  const entry: ServerCacheEntry = {
+    configHash: computeServerHash(options.definition, { home: options.home, env: options.env }),
+    cachedAt: options.now ?? Date.now(),
+    tools: options.tools,
+    resources: options.resources,
+    protocol: options.protocol,
+    ttlMs: options.ttlMs,
+    cacheScope,
+    warnings: options.warnings,
+  };
+  const bucket = options.cache.servers[options.serverName] ?? { private: {} };
+
   return {
-    version: 1,
+    version: 2,
     servers: {
       ...options.cache.servers,
-      [options.serverName]: {
-        configHash: computeServerHash(options.definition, { home: options.home, env: options.env }),
-        cachedAt: options.now ?? Date.now(),
-        tools: options.tools,
-        resources: options.resources,
-        protocol: options.protocol,
-      },
+      [options.serverName]: cacheScope === "public"
+        ? { public: entry, private: withoutKey(bucket.private, options.identityHash) }
+        : { private: { ...bucket.private, [options.identityHash]: entry } },
     },
   };
 }
@@ -114,27 +141,53 @@ export function updateServerProtocolCache(options: {
   cache: MetadataCache;
   serverName: string;
   definition: ServerEntry;
+  identityHash: string;
   protocol: CachedProtocolNegotiation;
   now?: number;
   home?: string;
   env?: Record<string, string | undefined>;
 }): MetadataCache {
   const configHash = computeServerHash(options.definition, { home: options.home, env: options.env });
-  const current = options.cache.servers[options.serverName];
+  const current = getServerCacheEntry(options.cache, options.serverName, options.identityHash);
   const reusable = current?.configHash === configHash ? current : undefined;
-  return {
-    version: 1,
-    servers: {
-      ...options.cache.servers,
-      [options.serverName]: {
-        configHash,
-        cachedAt: reusable?.cachedAt ?? options.now ?? Date.now(),
-        tools: reusable?.tools ?? [],
-        resources: reusable?.resources ?? [],
-        protocol: options.protocol,
-      },
-    },
-  };
+  return updateServerCache({
+    ...options,
+    tools: reusable?.tools ?? [],
+    resources: reusable?.resources ?? [],
+    cacheScope: reusable?.cacheScope ?? "private",
+    ttlMs: reusable?.ttlMs,
+    warnings: reusable?.warnings,
+    now: reusable?.cachedAt ?? options.now ?? Date.now(),
+  });
+}
+
+export function getServerCacheEntry(
+  cache: MetadataCache,
+  serverName: string,
+  identityHash: string,
+): ServerCacheEntry | undefined {
+  const bucket = cache.servers[serverName];
+  return bucket?.private[identityHash] ?? bucket?.public;
+}
+
+export function invalidateServerCache(options: {
+  cache: MetadataCache;
+  serverName: string;
+  identityHash: string;
+}): MetadataCache {
+  const bucket = options.cache.servers[options.serverName];
+  if (!bucket) return options.cache;
+
+  const nextBucket: ServerCacheBucket = bucket.private[options.identityHash]
+    ? { ...bucket, private: withoutKey(bucket.private, options.identityHash) }
+    : { private: bucket.private };
+  const servers = { ...options.cache.servers };
+  if (!nextBucket.public && Object.keys(nextBucket.private).length === 0) {
+    delete servers[options.serverName];
+  } else {
+    servers[options.serverName] = nextBucket;
+  }
+  return { version: 2, servers };
 }
 
 export function computeServerHash(
@@ -151,11 +204,9 @@ export function computeServerHash(
     url: definition.url,
     transport: definition.transport,
     protocolVersion: definition.protocolVersion,
-    headers: definition.headers ? interpolateEnvRecord(definition.headers, env) : undefined,
+    headers: definition.headers ? omitAuthorizationHeader(interpolateEnvRecord(definition.headers, env)) : undefined,
     auth: definition.auth,
-    bearerToken: definition.bearerToken ? interpolateEnvVars(definition.bearerToken, env) : undefined,
     bearerTokenEnv: definition.bearerTokenEnv,
-    bearerTokenEnvValue: definition.bearerTokenEnv ? env[definition.bearerTokenEnv] : undefined,
     oauth: normalizeOAuthForHash(definition.oauth, env),
     exposeResources: definition.exposeResources,
     excludeTools: definition.excludeTools,
@@ -169,7 +220,7 @@ function normalizeOAuthForHash(oauth: ServerEntry["oauth"], env: Record<string, 
   return {
     ...oauth,
     clientId: oauth.clientId !== undefined ? interpolateEnvVars(oauth.clientId, env) : undefined,
-    clientSecret: oauth.clientSecret !== undefined ? interpolateEnvVars(oauth.clientSecret, env) : undefined,
+    clientSecret: oauth.clientSecret === undefined ? undefined : "<configured>",
     scope: oauth.scope !== undefined ? interpolateEnvVars(oauth.scope, env) : undefined,
     redirectUri: oauth.redirectUri !== undefined ? interpolateEnvVars(oauth.redirectUri, env) : undefined,
     clientName: oauth.clientName !== undefined ? interpolateEnvVars(oauth.clientName, env) : undefined,
@@ -186,8 +237,9 @@ export function isServerCacheValid(
   const expectedHash = computeServerHash(definition, { home: options.home, env: options.env });
   if (entry.configHash !== expectedHash) return false;
 
-  const maxAgeMs = options.maxAgeMs ?? 7 * 24 * 60 * 60 * 1000;
+  const maxAgeMs = entry.ttlMs ?? options.maxAgeMs ?? 7 * 24 * 60 * 60 * 1000;
   if (maxAgeMs > 0 && (options.now ?? Date.now()) - entry.cachedAt > maxAgeMs) return false;
+  if (maxAgeMs === 0 && (options.now ?? Date.now()) >= entry.cachedAt) return false;
 
   return true;
 }
@@ -207,8 +259,12 @@ export function reconstructToolMetadata(
     metadata.push({
       name: formatToolName(tool.name, serverName, prefix),
       originalName: tool.name,
+      title: tool.title,
       description: tool.description ?? "",
       inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
+      annotations: tool.annotations,
+      icons: tool.icons,
       uiResourceUri: tool.uiResourceUri,
       uiStreamMode: tool.uiStreamMode,
     });
@@ -232,15 +288,24 @@ export function reconstructToolMetadata(
 }
 
 function isValidCache(value: unknown): value is MetadataCache {
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.servers)) return false;
-  return Object.values(value.servers).every((entry) => {
-    return isRecord(entry)
-      && typeof entry.configHash === "string"
-      && typeof entry.cachedAt === "number"
-      && Array.isArray(entry.tools)
-      && Array.isArray(entry.resources)
-      && isValidProtocolNegotiation(entry.protocol);
+  if (!isRecord(value) || value.version !== 2 || !isRecord(value.servers)) return false;
+  return Object.values(value.servers).every((bucket) => {
+    if (!isRecord(bucket) || !isRecord(bucket.private)) return false;
+    if (bucket.public !== undefined && !isValidServerCacheEntry(bucket.public)) return false;
+    return Object.values(bucket.private).every(isValidServerCacheEntry);
   });
+}
+
+function isValidServerCacheEntry(entry: unknown): entry is ServerCacheEntry {
+  return isRecord(entry)
+    && typeof entry.configHash === "string"
+    && typeof entry.cachedAt === "number"
+    && (entry.ttlMs === undefined || (typeof entry.ttlMs === "number" && entry.ttlMs >= 0))
+    && (entry.cacheScope === undefined || entry.cacheScope === "public" || entry.cacheScope === "private")
+    && (entry.warnings === undefined || (Array.isArray(entry.warnings) && entry.warnings.every((warning) => typeof warning === "string")))
+    && Array.isArray(entry.tools)
+    && Array.isArray(entry.resources)
+    && isValidProtocolNegotiation(entry.protocol);
 }
 
 function isValidProtocolNegotiation(value: unknown): boolean {
@@ -268,4 +333,14 @@ function sortValue(value: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function omitAuthorizationHeader(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== "authorization"));
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...record };
+  delete next[key];
+  return next;
 }

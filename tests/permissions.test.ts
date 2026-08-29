@@ -15,18 +15,22 @@ import type { AdapterRuntime } from "../src/runtime.js";
 function cacheFor(
   entries: Record<string, {
     definition: ServerEntry;
-    tools?: Array<{ name: string; description?: string }>;
+    tools?: Array<{ name: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }>;
   }>,
 ): MetadataCache {
   return {
-    version: 1,
+    version: 2,
     servers: Object.fromEntries(Object.entries(entries).map(([serverName, entry]) => [
       serverName,
       {
-        configHash: computeServerHash(entry.definition),
-        cachedAt: 1_000,
-        tools: entry.tools ?? [{ name: "search", description: "Search things" }],
-        resources: [],
+        public: {
+          configHash: computeServerHash(entry.definition),
+          cachedAt: 1_000,
+          cacheScope: "public",
+          tools: entry.tools ?? [{ name: "search", description: "Search things" }],
+          resources: [],
+        },
+        private: {},
       },
     ])),
   };
@@ -35,7 +39,7 @@ function cacheFor(
 function stateWith(config: McpConfig, cache?: MetadataCache): ProxyState {
   return createProxyState({
     config,
-    cache: cache ?? { version: 1, servers: {} },
+    cache: cache ?? { version: 2, servers: {} },
     now: 1_000,
   });
 }
@@ -176,6 +180,45 @@ describe("split model-tool permission decisions", () => {
     }), denied)?.decision).toBe("deny");
   });
 
+  it("uses annotations before the dangerous-name fallback", () => {
+    const annotated = stateWith(
+      {
+        mcpServers: { github: definition },
+        settings: { approval: { dangerousTools: "deny" } },
+      },
+      cacheFor({
+        github: {
+          definition,
+          tools: [
+            { name: "run_report", annotations: { readOnlyHint: true } },
+            { name: "inspect", annotations: { destructiveHint: true } },
+          ],
+        },
+      }),
+    );
+
+    expect(decideMcpPermission(permissionEvent("call_tool", {
+      name: "github_run_report",
+      args: {},
+    }), annotated)?.decision).toBe("allow");
+    expect(decideMcpPermission(permissionEvent("call_tool", {
+      name: "github_inspect",
+      args: {},
+    }), annotated)?.decision).toBe("alwaysAsk");
+  });
+
+  it("does not let a read-only hint bypass path-boundary checks", () => {
+    const annotated = stateWith(
+      { mcpServers: { github: definition } },
+      cacheFor({ github: { definition, tools: [{ name: "inspect", annotations: { readOnlyHint: true } }] } }),
+    );
+
+    expect(decideMcpPermission(permissionEvent("call_tool", {
+      name: "github_inspect",
+      args: { path: "/etc/passwd" },
+    }), annotated)?.decision).toBe("ask");
+  });
+
   it("asks for paths outside the working directory", () => {
     expect(decideMcpPermission(permissionEvent("call_tool", {
       name: "github_search",
@@ -231,6 +274,25 @@ describe("direct-tool permission decisions", () => {
 
     expect(decideMcpPermission(permissionEvent("fixture_search", { query: "x" }), state)?.decision).toBe("allow");
     expect(decideMcpPermission(permissionEvent("fixture_delete_all", {}), state)?.decision).toBe("ask");
+  });
+
+  it("applies annotation defaults to direct tools", () => {
+    const definition: ServerEntry = { command: "node", directTools: true };
+    const state = stateWith(
+      { mcpServers: { fixture: definition } },
+      cacheFor({
+        fixture: {
+          definition,
+          tools: [
+            { name: "run_report", annotations: { readOnlyHint: true } },
+            { name: "inspect", annotations: { destructiveHint: true } },
+          ],
+        },
+      }),
+    );
+
+    expect(decideMcpPermission(permissionEvent("fixture_run_report", {}), state)?.decision).toBe("allow");
+    expect(decideMcpPermission(permissionEvent("fixture_inspect", {}), state)?.decision).toBe("alwaysAsk");
   });
 });
 

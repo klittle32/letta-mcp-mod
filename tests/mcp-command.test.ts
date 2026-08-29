@@ -99,7 +99,7 @@ const fixtureDefinition: ServerEntry = { command: "node", args: ["fixture.mjs"] 
 function commandState(options: { config?: McpConfig; cache?: MetadataCache; warnings?: string[] } = {}): ProxyState {
   return createProxyState({
     config: options.config ?? { mcpServers: {} },
-    cache: options.cache ?? { version: 1, servers: {} },
+    cache: options.cache ?? { version: 2, servers: {} },
     warnings: options.warnings ?? [],
     now: 1_000,
   });
@@ -108,9 +108,11 @@ function commandState(options: { config?: McpConfig; cache?: MetadataCache; warn
 function cachedFixtureState(): ProxyState {
   const config: McpConfig = { mcpServers: { fixture: fixtureDefinition } };
   const cache = updateServerCache({
-    cache: { version: 1, servers: {} },
+    cache: { version: 2, servers: {} },
     serverName: "fixture",
     definition: fixtureDefinition,
+    identityHash: "fixture",
+    cacheScope: "public",
     now: 1_000,
     tools: [
       { name: "echo", description: "Echo a message", inputSchema: { type: "object", properties: { message: { type: "string" } } } },

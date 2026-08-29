@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getMetadataCachePath, loadMetadataCache } from "../src/core/cache.js";
+import { getMetadataCachePath } from "../src/core/cache.js";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { startHttpFixture } from "./helpers/http-fixture.js";
 
@@ -71,7 +71,7 @@ describe("adapter runtime", () => {
     expect(result.tools.map((tool) => tool.name)).toEqual(["echo", "list_items", "structured_status", "fail_soft", "throw_error"]);
     expect(result.resources.map((resource) => resource.uri)).toEqual(["fixture://readme", "fixture://blob"]);
     expect(result.cachePath).toBe(getMetadataCachePath(home));
-    expect(loadMetadataCache({ home })?.servers.fixture.cachedAt).toBe(1234);
+    expect(result.state.servers.get("fixture")?.cacheEntry?.cachedAt).toBe(1234);
     expect(runtime.loadState({ cwd }).servers.get("fixture")?.tools.map((tool) => tool.name)).toContain("fixture_echo");
     await runtime.closeAll();
   });
@@ -111,9 +111,9 @@ describe("adapter runtime", () => {
     const secondRuntime = createAdapterRuntime({ home, timeoutMs: 2_000 });
     const thirdRuntime = createAdapterRuntime({ home, timeoutMs: 2_000 });
     try {
-      await firstRuntime.connectAndRefresh({ cwd }, "remote");
+      const first = await firstRuntime.connectAndRefresh({ cwd }, "remote");
       await firstRuntime.closeAll();
-      expect(loadMetadataCache({ home })?.servers.remote.protocol?.era).toBe("modern");
+      expect(first.state.servers.get("remote")?.cacheEntry?.protocol?.era).toBe("modern");
       expect((await fixtureStats(fixture.url)).methods["server/discover"]).toBe(1);
 
       await secondRuntime.connectAndRefresh({ cwd }, "remote");

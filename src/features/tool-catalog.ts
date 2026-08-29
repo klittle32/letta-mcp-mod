@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
-import { emptyMetadataCache, isServerCacheValid, loadMetadataCache, reconstructToolMetadata, type MetadataCache, type ServerCacheEntry } from "../core/cache.js";
+import { emptyMetadataCache, getServerCacheEntry, isServerCacheValid, loadMetadataCache, reconstructToolMetadata, type MetadataCache, type ServerCacheEntry } from "../core/cache.js";
 import { loadMcpConfig, type LoadedMcpConfig, type McpConfig, type ServerEntry } from "../core/config.js";
 import { type ToolMetadata, type ToolPrefixMode } from "../core/tool-names.js";
+import { resolveCacheIdentityHash } from "../mcp/cache-identity.js";
 import type { CallToolResult } from "../runtime.js";
 
 export interface SearchToolsArgs {
@@ -12,6 +13,7 @@ export interface SearchToolsArgs {
 export interface ProxyServerState {
   name: string;
   definition: ServerEntry;
+  identityHash: string;
   cacheEntry?: ServerCacheEntry;
   cacheValid: boolean;
   tools: ToolMetadata[];
@@ -40,19 +42,27 @@ export function createProxyState(options: CreateProxyStateOptions): ProxyState {
   const cache = options.cache ?? emptyMetadataCache();
   const prefix = config.settings?.toolPrefix ?? "server";
   const servers = new Map<string, ProxyServerState>();
+  const warnings = [...(options.warnings ?? [])];
 
   for (const [name, definition] of Object.entries(config.mcpServers ?? {})) {
-    const cacheEntry = cache.servers[name];
+    const identityHash = resolveCacheIdentityHash({
+      serverName: name,
+      definition,
+      home: options.home,
+      env: options.env,
+    });
+    const cacheEntry = getServerCacheEntry(cache, name, identityHash);
     const cacheValid = isServerCacheValid(cacheEntry, definition, {
       now: options.now,
       home: options.home,
       env: options.env,
     });
     const tools = cacheEntry && cacheValid ? reconstructToolMetadata(name, cacheEntry, prefix, definition) : [];
-    servers.set(name, { name, definition, cacheEntry, cacheValid, tools });
+    if (cacheEntry?.warnings) warnings.push(...cacheEntry.warnings);
+    servers.set(name, { name, definition, identityHash, cacheEntry, cacheValid, tools });
   }
 
-  return { config, warnings: options.warnings ?? [], prefix, servers, home: options.home, env: options.env };
+  return { config, warnings, prefix, servers, home: options.home, env: options.env };
 }
 
 export function loadInvocationProxyState(ctx: { cwd: string }): ProxyState {
@@ -138,9 +148,11 @@ export function executeSearch(
     for (const match of selected) {
       lines.push(
         "",
-        `${match.tool.name} (${match.server.name})`,
+        `${formatToolDisplayName(match.tool)} (${match.server.name})`,
         `  ${match.tool.description || "(no description)"}`,
       );
+      const hint = formatAnnotationHint(match.tool);
+      if (hint) lines.push(`  ${hint}`);
       if (match.tool.uiResourceUri) lines.push(`  UI resource: ${match.tool.uiResourceUri}`);
       lines.push("  Input schema:", formatInputSchema(match.tool.inputSchema, "    "));
     }
@@ -168,14 +180,17 @@ function formatInputSchema(schema: unknown, indent: string): string {
 function scoreToolMatch(serverName: string, tool: ToolMetadata, query: string, terms: string[]): number {
   const name = tool.name.toLowerCase();
   const originalName = tool.originalName.toLowerCase();
+  const title = getToolTitle(tool)?.toLowerCase() ?? "";
   const description = tool.description.toLowerCase();
   const server = serverName.toLowerCase();
   let score = 0;
 
   if (name === query || originalName === query) score += 100;
+  if (title === query) score += 90;
   for (const term of terms) {
     if (name.includes(term)) score += 20;
     if (originalName.includes(term)) score += 15;
+    if (title.includes(term)) score += 10;
     if (description.includes(term)) score += 5;
     if (server.includes(term)) score += 2;
   }
@@ -189,7 +204,23 @@ export function formatRuntimeCallToolResult(result: CallToolResult): string {
 
 function formatToolListItem(tool: ToolMetadata): string {
   const ui = tool.uiResourceUri ? ` [UI resource: ${tool.uiResourceUri}]` : "";
-  return `- ${tool.name} - ${tool.description || "(no description)"}${ui}`;
+  const hint = formatAnnotationHint(tool);
+  return `- ${formatToolDisplayName(tool)} - ${tool.description || "(no description)"}${hint ? ` [${hint}]` : ""}${ui}`;
+}
+
+function formatToolDisplayName(tool: ToolMetadata): string {
+  const title = getToolTitle(tool);
+  return title && title !== tool.name ? `${tool.name} — ${title}` : tool.name;
+}
+
+function formatAnnotationHint(tool: ToolMetadata): string | undefined {
+  if (tool.annotations?.destructiveHint === true) return "destructive";
+  if (tool.annotations?.readOnlyHint === true) return "read-only";
+  return undefined;
+}
+
+function getToolTitle(tool: ToolMetadata): string | undefined {
+  return tool.title ?? tool.annotations?.title;
 }
 
 function plural(count: number, singular: string): string {

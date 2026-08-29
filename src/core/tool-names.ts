@@ -1,11 +1,17 @@
+import type { Icon, ToolAnnotations } from "@modelcontextprotocol/client";
+
 export type ToolPrefixMode = "server" | "short" | "none";
 export type UiStreamMode = "eager" | "stream-first";
 
 export interface ToolMetadata {
   name: string;
   originalName: string;
+  title?: string;
   description: string;
   inputSchema?: unknown;
+  outputSchema?: unknown;
+  annotations?: ToolAnnotations;
+  icons?: Icon[];
   resourceUri?: string;
   uiResourceUri?: string;
   uiStreamMode?: UiStreamMode;

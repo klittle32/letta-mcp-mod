@@ -6,6 +6,7 @@ import {
   computeServerHash,
   emptyMetadataCache,
   getMetadataCachePath,
+  getServerCacheEntry,
   isServerCacheValid,
   loadMetadataCache,
   reconstructToolMetadata,
@@ -15,6 +16,7 @@ import {
   type MetadataCache,
 } from "../src/core/cache.js";
 import type { ServerEntry } from "../src/core/config.js";
+import { createProxyState } from "../src/features/tool-catalog.js";
 
 function tempHome() {
   const home = mkdtempSync(join(tmpdir(), "letta-mcp-cache-"));
@@ -27,12 +29,14 @@ function writeJson(path: string, value: unknown) {
 }
 
 describe("metadata cache", () => {
+  const identityHash = "identity";
+
   it("missing cache returns null", () => {
     expect(loadMetadataCache({ home: tempHome() })).toBeNull();
   });
 
   it("empty cache helper returns versioned empty cache", () => {
-    expect(emptyMetadataCache()).toEqual({ version: 1, servers: {} });
+    expect(emptyMetadataCache()).toEqual({ version: 2, servers: {} });
   });
 
   it("invalid cache JSON returns null with warning", () => {
@@ -46,9 +50,27 @@ describe("metadata cache", () => {
     expect(warnings.some((warning) => warning.includes("Invalid cache JSON"))).toBe(true);
   });
 
+  it("rejects version 1 caches so they rebuild lazily", () => {
+    const home = tempHome();
+    const cachePath = getMetadataCachePath(home);
+    writeJson(cachePath, { version: 1, servers: {} });
+    const warnings: string[] = [];
+
+    expect(loadMetadataCache({ home, warnings })).toBeNull();
+    expect(warnings).toEqual([`Invalid cache shape in ${cachePath}.`]);
+  });
+
   it("valid cache loads", () => {
     const home = tempHome();
-    const cache: MetadataCache = { version: 1, servers: { filesystem: { configHash: "abc", cachedAt: 1, tools: [], resources: [] } } };
+    const cache: MetadataCache = {
+      version: 2,
+      servers: {
+        filesystem: {
+          public: { configHash: "abc", cachedAt: 1, tools: [], resources: [], cacheScope: "public" },
+          private: {},
+        },
+      },
+    };
     writeJson(getMetadataCachePath(home), cache);
 
     expect(loadMetadataCache({ home })).toEqual(cache);
@@ -57,8 +79,13 @@ describe("metadata cache", () => {
   it("saveMetadataCache creates parent directory and round-trips", () => {
     const home = tempHome();
     const cache: MetadataCache = {
-      version: 1,
-      servers: { filesystem: { configHash: "abc", cachedAt: 1, tools: [{ name: "read_file" }], resources: [] } },
+      version: 2,
+      servers: {
+        filesystem: {
+          public: { configHash: "abc", cachedAt: 1, tools: [{ name: "read_file" }], resources: [], cacheScope: "public" },
+          private: {},
+        },
+      },
     };
 
     saveMetadataCache({ home, cache });
@@ -69,47 +96,57 @@ describe("metadata cache", () => {
 
   it("saveMetadataCache writes stable pretty JSON", () => {
     const home = tempHome();
-    saveMetadataCache({ home, cache: { version: 1, servers: {} } });
+    saveMetadataCache({ home, cache: { version: 2, servers: {} } });
 
-    expect(readFileSync(getMetadataCachePath(home), "utf8")).toBe('{\n  "servers": {},\n  "version": 1\n}\n');
+    expect(readFileSync(getMetadataCachePath(home), "utf8")).toBe('{\n  "servers": {},\n  "version": 2\n}\n');
   });
 
   it("updateServerCache sets hash, timestamp, tools, and resources", () => {
     const definition: ServerEntry = { command: "npx", args: ["server"] };
     const updated = updateServerCache({
-      cache: { version: 1, servers: {} },
+      cache: { version: 2, servers: {} },
       serverName: "filesystem",
       definition,
+      identityHash,
       tools: [{ name: "read_file", description: "Read" }],
       resources: [{ name: "README", uri: "file:///README.md" }],
+      cacheScope: "public",
       now: 12_345,
     });
 
-    expect(updated.servers.filesystem).toEqual({
+    expect(updated.servers.filesystem.public).toEqual({
       configHash: computeServerHash(definition),
       cachedAt: 12_345,
       tools: [{ name: "read_file", description: "Read" }],
       resources: [{ name: "README", uri: "file:///README.md" }],
+      cacheScope: "public",
     });
   });
 
   it("updateServerCache preserves other servers and does not mutate original cache", () => {
     const original: MetadataCache = {
-      version: 1,
-      servers: { other: { configHash: "other", cachedAt: 1, tools: [], resources: [] } },
+      version: 2,
+      servers: {
+        other: {
+          public: { configHash: "other", cachedAt: 1, tools: [], resources: [], cacheScope: "public" },
+          private: {},
+        },
+      },
     };
 
     const updated = updateServerCache({
       cache: original,
       serverName: "filesystem",
       definition: { command: "npx" },
+      identityHash,
       tools: [],
       resources: [],
+      cacheScope: "public",
       now: 2,
     });
 
     expect(updated.servers.other).toEqual(original.servers.other);
-    expect(updated.servers.filesystem.cachedAt).toBe(2);
+    expect(updated.servers.filesystem.public?.cachedAt).toBe(2);
     expect(original.servers.filesystem).toBeUndefined();
   });
 
@@ -119,8 +156,10 @@ describe("metadata cache", () => {
       cache: emptyMetadataCache(),
       serverName: "filesystem",
       definition,
+      identityHash,
       tools: [{ name: "read_file" }],
       resources: [{ name: "README", uri: "file:///README.md" }],
+      cacheScope: "public",
       now: 100,
     });
 
@@ -128,11 +167,12 @@ describe("metadata cache", () => {
       cache,
       serverName: "filesystem",
       definition,
+      identityHash,
       protocol: { era: "legacy", version: "2025-11-25" },
       now: 200,
     });
 
-    expect(updated.servers.filesystem).toMatchObject({
+    expect(updated.servers.filesystem.public).toMatchObject({
       cachedAt: 100,
       tools: [{ name: "read_file" }],
       resources: [{ name: "README", uri: "file:///README.md" }],
@@ -170,6 +210,75 @@ describe("metadata cache", () => {
     expect(isServerCacheValid(entry, { command: "node" }, { now: 2_000, maxAgeMs: 2_000 })).toBe(false);
   });
 
+  it("honours server TTL including immediate staleness", () => {
+    const definition: ServerEntry = { command: "npx", args: ["server"] };
+    const entry = {
+      configHash: computeServerHash(definition),
+      cachedAt: 1_000,
+      ttlMs: 500,
+      cacheScope: "public" as const,
+      tools: [],
+      resources: [],
+    };
+
+    expect(isServerCacheValid(entry, definition, { now: 1_500 })).toBe(true);
+    expect(isServerCacheValid(entry, definition, { now: 1_501 })).toBe(false);
+    expect(isServerCacheValid({ ...entry, ttlMs: 0 }, definition, { now: 1_000 })).toBe(false);
+  });
+
+  it("isolates private entries by identity while sharing public entries", () => {
+    const definition: ServerEntry = { url: "https://example.test/mcp", auth: "bearer" };
+    let cache = updateServerCache({
+      cache: emptyMetadataCache(),
+      serverName: "remote",
+      definition,
+      identityHash: "token-a",
+      tools: [{ name: "private_a" }],
+      resources: [],
+      cacheScope: "private",
+    });
+
+    expect(getServerCacheEntry(cache, "remote", "token-a")?.tools[0]?.name).toBe("private_a");
+    expect(getServerCacheEntry(cache, "remote", "token-b")).toBeUndefined();
+
+    cache = updateServerCache({
+      cache,
+      serverName: "remote",
+      definition,
+      identityHash: "token-b",
+      tools: [{ name: "public_tool" }],
+      resources: [],
+      cacheScope: "public",
+    });
+    expect(getServerCacheEntry(cache, "remote", "token-a")?.tools[0]?.name).toBe("private_a");
+    expect(getServerCacheEntry(cache, "remote", "token-b")?.tools[0]?.name).toBe("public_tool");
+    expect(getServerCacheEntry(cache, "remote", "token-c")?.tools[0]?.name).toBe("public_tool");
+  });
+
+  it("surfaces persisted metadata warnings through proxy state", () => {
+    const definition: ServerEntry = { command: "node" };
+    const cache = updateServerCache({
+      cache: emptyMetadataCache(),
+      serverName: "fixture",
+      definition,
+      identityHash,
+      tools: [],
+      resources: [],
+      cacheScope: "public",
+      warnings: ['Server "fixture": Dropped MCP tool "invalid" because its annotations are invalid.'],
+      now: 1_000,
+    });
+
+    const state = createProxyState({
+      config: { mcpServers: { fixture: definition } },
+      cache,
+      now: 1_000,
+    });
+    expect(state.warnings).toEqual([
+      'Server "fixture": Dropped MCP tool "invalid" because its annotations are invalid.',
+    ]);
+  });
+
   it("reconstruct metadata includes cached tools", () => {
     const metadata = reconstructToolMetadata(
       "filesystem",
@@ -181,6 +290,33 @@ describe("metadata cache", () => {
     expect(metadata).toEqual([
       { name: "filesystem_read_file", originalName: "read_file", description: "Read file", inputSchema: { type: "object" } },
     ]);
+  });
+
+  it("reconstruct metadata preserves title, annotations, output schema, and icons", () => {
+    const metadata = reconstructToolMetadata(
+      "filesystem",
+      {
+        configHash: "x",
+        cachedAt: 1,
+        tools: [{
+          name: "inspect",
+          title: "Inspect safely",
+          annotations: { readOnlyHint: true },
+          outputSchema: { type: "object" },
+          icons: [{ src: "https://example.test/icon.svg" }],
+        }],
+        resources: [],
+      },
+      "server",
+      {},
+    );
+
+    expect(metadata[0]).toMatchObject({
+      title: "Inspect safely",
+      annotations: { readOnlyHint: true },
+      outputSchema: { type: "object" },
+      icons: [{ src: "https://example.test/icon.svg" }],
+    });
   });
 
   it("reconstruct metadata includes resources as synthetic tools when exposeResources is not false", () => {
@@ -232,10 +368,10 @@ describe("HTTP cache identity", () => {
     );
   });
 
-  it("server hash changes when bearerTokenEnv value changes", () => {
+  it("server hash excludes bearer identity values", () => {
     const definition: ServerEntry = { url: "http://localhost/mcp", auth: "bearer", bearerTokenEnv: "MY_TOKEN" };
 
-    expect(computeServerHash(definition, { env: { MY_TOKEN: "one" } })).not.toBe(
+    expect(computeServerHash(definition, { env: { MY_TOKEN: "one" } })).toBe(
       computeServerHash(definition, { env: { MY_TOKEN: "two" } }),
     );
   });
@@ -258,14 +394,14 @@ describe("HTTP cache identity", () => {
     );
   });
 
-  it("server hash changes when OAuth client secret env value changes", () => {
+  it("server hash excludes OAuth client secret values", () => {
     const definition: ServerEntry = {
       url: "http://localhost/mcp",
       auth: "oauth",
       oauth: { clientId: "client", clientSecret: "${CLIENT_SECRET}" },
     };
 
-    expect(computeServerHash(definition, { env: { CLIENT_SECRET: "one" } })).not.toBe(
+    expect(computeServerHash(definition, { env: { CLIENT_SECRET: "one" } })).toBe(
       computeServerHash(definition, { env: { CLIENT_SECRET: "two" } }),
     );
   });

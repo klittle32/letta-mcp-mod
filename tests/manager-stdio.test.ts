@@ -311,7 +311,10 @@ describe("McpServerManager stdio", () => {
         const connection = await manager.connect("remote", { url: fixture.url, headers: { "x-fixture-header": "present" } }, { cwd: repoRoot, timeoutMs: 2_000 });
         const result = await connection.client.callTool({ name: "headers_seen", arguments: {} }, { timeout: 2_000 });
 
-        expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ authorization: "missing", fixture: "present" }) }]);
+        expect(result.content).toEqual([{
+          type: "text",
+          text: JSON.stringify({ authorization: "missing", fixture: "present", param: "missing" }),
+        }]);
       });
     } finally {
       await fixture.stop();

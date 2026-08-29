@@ -12,12 +12,18 @@ function tempWorkspace() {
   return { root, home, cwd };
 }
 
-function writeWorkspaceConfig(cwd: string, servers = ["fixture"], settings?: Record<string, unknown>) {
+function writeWorkspaceConfig(
+  cwd: string,
+  servers = ["fixture"],
+  settings?: Record<string, unknown>,
+  fixtureEnv?: Record<string, string>,
+) {
   const mcpServers: Record<string, unknown> = {};
   if (servers.includes("fixture")) {
     mcpServers.fixture = {
       command: process.execPath,
       args: [join(process.cwd(), "tests/fixtures/stdio-mcp-fixture.mjs")],
+      ...(fixtureEnv ? { env: fixtureEnv } : {}),
     };
   }
   if (servers.includes("remote")) {
@@ -131,6 +137,57 @@ describe("adapter runtime callTool", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toContain('Failed to call MCP tool "fixture_throw_error" on "fixture"');
     await runtime.closeAll();
+  });
+
+  it("invalidates persisted metadata after a live tools-list change", async () => {
+    const { home, cwd } = tempWorkspace();
+    writeWorkspaceConfig(cwd, ["fixture"], undefined, { NOTIFY_LIST_CHANGED: "1" });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    try {
+      await runtime.connectAndRefresh({ cwd }, "fixture");
+      expect(runtime.loadState({ cwd }).servers.get("fixture")?.cacheEntry).toBeDefined();
+
+      const result = await runtime.callTool(
+        { cwd },
+        runtime.loadState({ cwd }),
+        "fixture_list_items",
+        {},
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(result).toMatchObject({ ok: true });
+      expect(runtime.loadState({ cwd }).servers.get("fixture")?.cacheEntry).toBeUndefined();
+    } finally {
+      await runtime.closeAll();
+    }
+  });
+
+  it("refreshes stale metadata after invalid params without replaying the tool call", async () => {
+    const { home, cwd } = tempWorkspace();
+    const toolsListCount = join(cwd, "tools-list-count.txt");
+    const toolsCallCount = join(cwd, "tools-call-count.txt");
+    writeWorkspaceConfig(cwd, ["fixture"], undefined, {
+      STALE_CATALOG_ERROR: "1",
+      TOOLS_LIST_COUNT_FILE: toolsListCount,
+      TOOLS_CALL_COUNT_FILE: toolsCallCount,
+    });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    try {
+      await runtime.connectAndRefresh({ cwd }, "fixture");
+      const result = await runtime.callTool(
+        { cwd },
+        runtime.loadState({ cwd }),
+        "fixture_throw_error",
+        {},
+      );
+
+      expect(result).toMatchObject({ ok: false });
+      expect(readFileSync(toolsListCount, "utf8").trim().split("\n")).toHaveLength(2);
+      expect(readFileSync(toolsCallCount, "utf8").trim().split("\n")).toHaveLength(1);
+      expect(runtime.loadState({ cwd }).servers.get("fixture")?.cacheValid).toBe(true);
+    } finally {
+      await runtime.closeAll();
+    }
   });
 
   it("synthetic resource tool reads resource text", async () => {

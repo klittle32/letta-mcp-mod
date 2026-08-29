@@ -1,8 +1,10 @@
 import { homedir } from "node:os";
-import { SdkError, SdkErrorCode, type PriorDiscovery } from "@modelcontextprotocol/client";
+import { ProtocolError, ProtocolErrorCode, SdkError, SdkErrorCode, type PriorDiscovery, type Tool } from "@modelcontextprotocol/client";
 import {
   emptyMetadataCache,
   getMetadataCachePath,
+  getServerCacheEntry,
+  invalidateServerCache,
   isServerCacheValid,
   loadMetadataCache,
   saveMetadataCache,
@@ -17,8 +19,9 @@ import { guardMcpOutput } from "./core/output-guard.js";
 import { renderCallToolResult, renderReadResourceResult } from "./core/result-renderer.js";
 import { loadMcpConfig, type McpConfig, type ServerEntry } from "./core/config.js";
 import { createProxyState, type ProxyState } from "./features/tool-catalog.js";
+import { resolveCacheIdentityHash } from "./mcp/cache-identity.js";
 import { InvalidServerConfigError, McpServerManager, UnsupportedTransportError } from "./mcp/manager.js";
-import { discoverServerMetadata } from "./mcp/metadata.js";
+import { discoverServerMetadata, mergeCachePolicies, readCachePolicy } from "./mcp/metadata.js";
 import { inferServerHint, resolveToolTarget, type ToolTarget } from "./mcp/calls.js";
 
 export interface RuntimeToolContext {
@@ -79,12 +82,21 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
     return { config: loaded.config, cache, warnings };
   }
 
+  function invalidateLiveServerCache(serverName: string, definition: ServerEntry): void {
+    const cache = loadMetadataCache({ home });
+    if (!cache) return;
+    const identityHash = resolveCacheIdentityHash({ serverName, definition, home, env });
+    const invalidated = invalidateServerCache({ cache, serverName, identityHash });
+    if (invalidated !== cache) saveMetadataCache({ home, cache: invalidated });
+  }
+
   async function connectAndRefreshServer(ctx: RuntimeToolContext, serverName: string): Promise<ConnectRefreshResult> {
     const { config, cache, warnings } = loadConfigAndCache(ctx);
     const definition = config.mcpServers[serverName];
     if (!definition) throw new ServerNotConfiguredError(`Server "${serverName}" is not configured. Use /lmcp status to list configured servers.`);
 
-    const cacheEntry = cache.servers[serverName];
+    const initialIdentityHash = resolveCacheIdentityHash({ serverName, definition, home, env });
+    const cacheEntry = getServerCacheEntry(cache, serverName, initialIdentityHash);
     const prior = isServerCacheValid(cacheEntry, definition, { now: now(), home, env })
       ? toPriorDiscovery(cacheEntry)
       : undefined;
@@ -95,20 +107,36 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
       signal: ctx.signal,
       timeoutMs,
       prior,
+      onToolsChanged: () => invalidateLiveServerCache(serverName, definition),
     });
     let metadata: Awaited<ReturnType<typeof discoverServerMetadata>>;
     try {
-      metadata = await discoverMetadataWithRetry(connection.client, { signal: ctx.signal, timeout: timeoutMs });
+      metadata = await discoverMetadataWithRetry(connection.client, {
+        signal: ctx.signal,
+        timeout: timeoutMs,
+        cacheMode: "refresh",
+      });
     } catch (error) {
       if (isConnectionFailure(error)) await manager.close(serverName).catch(() => undefined);
       throw error;
     }
+    const identityHash = resolveCacheIdentityHash({ serverName, definition, home, env });
+    const protocolPolicy = connection.protocol.era === "modern"
+      ? readCachePolicy(connection.protocol.discover)
+      : {};
+    const cachePolicy = mergeCachePolicies(metadata.cachePolicy, protocolPolicy);
     const updatedCache = updateServerCache({
       cache,
       serverName,
       definition,
+      identityHash,
       tools: metadata.tools,
       resources: metadata.resources,
+      ttlMs: cachePolicy.ttlMs,
+      cacheScope: cachePolicy.cacheScope,
+      warnings: metadata.warnings.length > 0
+        ? metadata.warnings.map((warning) => `Server "${serverName}": ${warning}`)
+        : undefined,
       protocol: connection.protocol,
       now: now(),
       home,
@@ -186,6 +214,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
           signal: ctx.signal,
           timeoutMs,
           prior: serverState?.cacheValid ? toPriorDiscovery(serverState.cacheEntry) : undefined,
+          onToolsChanged: () => invalidateLiveServerCache(target.serverName, definition),
         });
         if (!serverState?.cacheValid || !serverState.cacheEntry?.protocol) {
           const cache = loadMetadataCache({ home }) ?? emptyMetadataCache();
@@ -195,6 +224,12 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
               cache,
               serverName: target.serverName,
               definition,
+              identityHash: resolveCacheIdentityHash({
+                serverName: target.serverName,
+                definition,
+                home,
+                env,
+              }),
               protocol: connection.protocol,
               now: now(),
               home,
@@ -209,10 +244,22 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
           return { ok: true, target, output: await guardOutput(output, result), isError: false };
         }
 
-        const result = await connection.client.callTool(
-          { name: target.originalName, arguments: args },
-          { signal: ctx.signal, timeout: timeoutMs },
-        );
+        let result: Awaited<ReturnType<typeof connection.client.callTool>>;
+        try {
+          result = await connection.client.callTool(
+            { name: target.originalName, arguments: args },
+            {
+              signal: ctx.signal,
+              timeout: timeoutMs,
+              toolDefinition: toSdkToolDefinition(target),
+            },
+          );
+        } catch (error) {
+          if (isStaleCatalogError(error)) {
+            await connectAndRefreshServer(ctx, target.serverName).catch(() => undefined);
+          }
+          throw error;
+        }
         const rendered = renderCallToolResult(result);
         const heading = rendered.isError
           ? `MCP tool "${target.exposedName}" on "${target.serverName}" returned an error.`
@@ -241,6 +288,18 @@ function toPriorDiscovery(entry: ServerCacheEntry | undefined): PriorDiscovery |
   return undefined;
 }
 
+function toSdkToolDefinition(target: ToolTarget): Tool {
+  return {
+    name: target.originalName,
+    title: target.metadata.title,
+    description: target.metadata.description || undefined,
+    inputSchema: target.metadata.inputSchema ?? { type: "object" },
+    outputSchema: target.metadata.outputSchema,
+    annotations: target.metadata.annotations,
+    icons: target.metadata.icons,
+  } as Tool;
+}
+
 async function discoverMetadataWithRetry(
   client: Parameters<typeof discoverServerMetadata>[0],
   options: Parameters<typeof discoverServerMetadata>[1],
@@ -261,4 +320,10 @@ function isConnectionFailure(error: unknown): boolean {
     return /fetch|network|socket|connection/i.test(error.message);
   }
   return false;
+}
+
+function isStaleCatalogError(error: unknown): boolean {
+  if (error instanceof ProtocolError && error.code === ProtocolErrorCode.InvalidParams) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /unknown tool|tool .+ not found/i.test(message);
 }

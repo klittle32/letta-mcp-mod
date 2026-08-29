@@ -10,7 +10,7 @@ A Letta Code port of the `pi-mcp-adapter` pattern: a lazy, context-efficient MCP
 - Lazy MCP connections: activation reads local config/cache but does not start MCP server processes or perform HTTP MCP network work.
 - Transparent metadata refresh when search needs current information.
 - Aggregate output guarding with private spill files for oversized results.
-- Metadata caching under `~/.letta/mcp-adapter/cache.json`.
+- TTL- and auth-scope-aware metadata caching under `~/.letta/mcp-adapter/cache.json`.
 - Stdio and Streamable HTTP MCP transports.
 - MCP protocol-version negotiation with cached discovery results.
 - HTTP bearer auth and OAuth authorization-code / client-credentials flows.
@@ -378,11 +378,23 @@ call_tool({
 })
 ```
 
-`search_tools` refreshes missing or stale metadata as needed and returns bounded, ranked results with callable names, descriptions, and full argument schemas. If one integration is unavailable, usable results from other integrations are still returned with a concise failure note.
+`search_tools` refreshes missing or stale metadata as needed and returns bounded, ranked results with callable names, tool titles, read-only/destructive hints, descriptions, and full argument schemas. If one integration is unavailable, usable results from other integrations are still returned with a concise failure note.
 
 `call_tool` accepts the callable name returned by search and a normal object matching that result's schema. It connects lazily and supports stdio, HTTP, and synthetic resource tools through the same interface.
 
 Setup, status, explicit reconnects, and OAuth are intentionally human-facing `/lmcp` operations rather than model tool modes.
+
+## Metadata cache behavior
+
+The adapter persists tool/resource metadata and negotiated protocol discovery, but MCP servers control freshness:
+
+- `ttlMs` is honored without background polling. Expired metadata refreshes at the next lazy search, resolution, or explicit reconnect.
+- `cacheScope: "public"` metadata can be reused across authenticated principals for the same server configuration.
+- `cacheScope: "private"` metadata is partitioned by a one-way fingerprint of the effective bearer identity or OAuth issuer and subject. Raw credentials are never written to the metadata cache.
+- Live `notifications/tools/list_changed` events invalidate the active disk entry. An unknown-tool or invalid-params call error refreshes the catalog without replaying the failed tool call.
+- Legacy servers without cache hints retain the adapter's seven-day fallback.
+
+The version 2 cache format is a clean replacement. Older cache files are ignored and rebuilt lazily; run `/lmcp reconnect` to rebuild immediately.
 
 ## Output guard and retained results
 
@@ -423,6 +435,8 @@ Default behavior:
 
 - Tool search is allowed.
 - Known tool calls are allowed unless they look risky.
+- Tools marked `readOnlyHint: true` by the MCP server are allowed without the name heuristic, subject to the independent path-boundary check.
+- Tools marked `destructiveHint: true` always ask.
 - An uncached call attributable to a configured server asks before lazy connection; an ambiguous unknown target is denied.
 - Tool names containing words like `delete`, `write`, `update`, `exec`, `run`, `shell`, or `browser` ask by default.
 - Tool arguments with path-like keys (`path`, `file`, `dir`, `cwd`, `target`, `destination`, etc.) ask if they resolve outside the current working directory.
@@ -456,7 +470,7 @@ Notes:
 
 When Letta Code exposes status values, the mod registers a compact `mcp` status value that summarizes configured servers, cached tools, stale/missing cache, and warnings. Set `settings.ui.status` to `false` to disable this status value.
 
-MCP UI resource hints such as `_meta["openai/outputTemplate"]` / `_meta.uiResourceUri` are preserved in cached metadata and surfaced by `search_tools` and `/lmcp tools`. Text resources returned from MCP calls are rendered in output; binary/blob resources are summarized rather than dumped.
+MCP tool titles, annotations, output schemas, icons, and UI resource hints such as `_meta["openai/outputTemplate"]` / `_meta.uiResourceUri` are preserved in cached metadata. Titles, safety hints, and UI resources are surfaced by `search_tools` and `/lmcp tools`. Text resources returned from MCP calls are rendered in output; binary/blob resources are summarized rather than dumped.
 
 ## Safety and limitations
 

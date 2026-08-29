@@ -1,6 +1,6 @@
 # Milestone 4: metadata and cache semantics
 
-Status: approved for implementation by the Milestone 4 request.
+Status: implemented.
 
 ## Objective
 

@@ -194,12 +194,20 @@ function decideDirectToolCall(
     return undefined;
   }
 
-  if (isDangerousDirectTool(descriptor)) {
-    return { decision: approval.dangerousTools, reason: `MCP direct tool "${event.toolName}" is potentially dangerous.` };
+  if (descriptor.annotations?.destructiveHint === true) {
+    return { decision: "alwaysAsk", reason: `MCP direct tool "${event.toolName}" is marked destructive by the server.` };
   }
 
   if (hasPathOutsideWorkingDirectory(event.args, event.cwd || event.workingDirectory)) {
     return { decision: approval.dangerousTools, reason: `MCP direct tool "${event.toolName}" uses a path outside the working directory.` };
+  }
+
+  if (descriptor.annotations?.readOnlyHint === true) {
+    return { decision: "allow", reason: `MCP direct tool "${event.toolName}" is marked read-only by the server.` };
+  }
+
+  if (isDangerousDirectTool(descriptor)) {
+    return { decision: approval.dangerousTools, reason: `MCP direct tool "${event.toolName}" is potentially dangerous.` };
   }
 
   return { decision: "allow", reason: `MCP direct tool "${event.toolName}" is allowed by policy.` };
@@ -226,12 +234,20 @@ function decideCallTool(
     return { decision: "ask", reason: `MCP tool "${toolName}" needs a metadata refresh from configured server "${serverHint}" before execution.` };
   }
 
-  if (isDangerousToolName(resolution.tool.name) || isDangerousToolName(resolution.tool.originalName)) {
-    return { decision: approval.dangerousTools, reason: `MCP tool "${toolName}" is potentially dangerous.` };
+  if (resolution.tool.annotations?.destructiveHint === true) {
+    return { decision: "alwaysAsk", reason: `MCP tool "${toolName}" is marked destructive by the server.` };
   }
 
   if (hasPathOutsideWorkingDirectory(toolArgs, event.cwd || event.workingDirectory)) {
     return { decision: approval.dangerousTools, reason: `MCP tool "${toolName}" uses a path outside the working directory.` };
+  }
+
+  if (resolution.tool.annotations?.readOnlyHint === true) {
+    return { decision: "allow", reason: `MCP tool "${toolName}" is marked read-only by the server.` };
+  }
+
+  if (isDangerousToolName(resolution.tool.name) || isDangerousToolName(resolution.tool.originalName)) {
+    return { decision: approval.dangerousTools, reason: `MCP tool "${toolName}" is potentially dangerous.` };
   }
 
   return { decision: "allow", reason: `MCP tool "${toolName}" is allowed by policy.` };

@@ -77,13 +77,17 @@ function createFakeRuntime(
 function directState() {
   const definition: ServerEntry = { command: "node", directTools: true };
   const cache: MetadataCache = {
-    version: 1,
+    version: 2,
     servers: {
       fixture: {
-        configHash: computeServerHash(definition),
-        cachedAt: 1_000,
-        tools: [{ name: "echo", description: "Echo text", inputSchema: { type: "object" } }],
-        resources: [],
+        public: {
+          configHash: computeServerHash(definition),
+          cachedAt: 1_000,
+          cacheScope: "public",
+          tools: [{ name: "echo", description: "Echo text", inputSchema: { type: "object" } }],
+          resources: [],
+        },
+        private: {},
       },
     },
   };

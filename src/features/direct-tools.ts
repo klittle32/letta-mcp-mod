@@ -11,6 +11,7 @@ export interface DirectToolDescriptor {
   originalName: string;
   description: string;
   parameters: unknown;
+  annotations?: ToolMetadata["annotations"];
   resourceUri?: string;
 }
 
@@ -48,6 +49,7 @@ export function collectDirectToolDescriptors(state: ProxyState): DirectToolDescr
         originalName: tool.originalName,
         description: tool.description || `Call MCP tool ${tool.originalName} on ${server.name}.`,
         parameters: tool.resourceUri ? emptyObjectSchema() : (tool.inputSchema ?? emptyObjectSchema()),
+        ...(tool.annotations ? { annotations: tool.annotations } : {}),
         ...(tool.resourceUri ? { resourceUri: tool.resourceUri } : {}),
       });
     }
