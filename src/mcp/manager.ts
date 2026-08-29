@@ -167,7 +167,7 @@ export class McpServerManager {
 
 function createClient(definition: ServerEntry, options: Pick<ConnectOptions, "onToolsChanged">): Client {
   return new Client(
-    { name: "letta-mcp-adapter", version: "0.1.0" },
+    { name: "letta-mcp-adapter", version: "0.2.0" },
     {
       capabilities: {},
       inputRequired: { autoFulfill: false },
