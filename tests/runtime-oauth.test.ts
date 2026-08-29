@@ -72,7 +72,10 @@ describe("adapter runtime OAuth integration", () => {
       const cachedState = runtime.loadState({ cwd });
       expect(cachedState.servers.get("remote")?.tools.map((tool) => tool.name)).toContain("remote_echo");
       const called = await runtime.callTool({ cwd }, cachedState, "remote_echo", { message: "hello oauth" });
-      expect(called).toMatchObject({ ok: true, output: "hello oauth" });
+      expect(called).toMatchObject({
+        ok: true,
+        output: 'Called "remote_echo" on "remote".\n\nhello oauth',
+      });
     } finally {
       await runtime.closeAll();
       await fixture.stop();

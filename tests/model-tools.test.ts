@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCallToolTool, createSearchToolsTool } from "../src/mod.js";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { startHttpFixture } from "./helpers/http-fixture.js";
@@ -168,6 +168,29 @@ describe("call_tool", () => {
 
     await expect(tool.run({ cwd: process.cwd(), args: { args: {} } })).resolves.toContain("requires a tool name");
     await expect(tool.run({ cwd: process.cwd(), args: { name: "echo", args: "{}" } })).resolves.toContain("args must be an object");
+    await expect(tool.run({ cwd: process.cwd(), args: { name: "echo", args: {}, maxOutput: 999 } })).resolves.toContain(
+      "maxOutput must be an integer from 1000 to 1000000",
+    );
+  });
+
+  it("passes maxOutput as a runtime option instead of an MCP argument", async () => {
+    const runtime = createAdapterRuntime();
+    const callTool = vi.fn(async () => ({ ok: false as const, message: "captured" }));
+    runtime.callTool = callTool;
+    const tool = createCallToolTool(runtime);
+
+    await tool.run({
+      cwd: process.cwd(),
+      args: { name: "fixture_echo", args: { message: "hello" }, maxOutput: 2_000 },
+    });
+
+    expect(callTool).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "fixture_echo",
+      { message: "hello" },
+      { maxOutput: 2_000 },
+    );
   });
 
   it("guides unknown calls back to search_tools", async () => {

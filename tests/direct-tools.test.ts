@@ -235,7 +235,7 @@ function fakeRuntime(callResult: Awaited<ReturnType<AdapterRuntime["callTool"]>>
     metadata: { name: "fixture_echo", originalName: "echo", description: "Echo text" },
     isResource: false,
   },
-  output: "hello",
+  output: 'Called "fixture_echo" on "fixture".\n\nhello',
   isError: false,
 }): AdapterRuntime {
   const state = createProxyState({ config: { mcpServers: {} } });

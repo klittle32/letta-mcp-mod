@@ -12,6 +12,12 @@ export interface McpApprovalSettings {
   configWrites?: ApprovalDecision;
 }
 
+export interface McpOutputGuardSettings {
+  maxChars?: number;
+  maxFiles?: number;
+  maxAgeMs?: number;
+}
+
 export interface OAuthConfig {
   grantType?: "authorization_code" | "client_credentials";
   clientId?: string;
@@ -57,6 +63,7 @@ export interface McpSettings {
   sampling?: { enabled?: boolean; mode?: "disabled" | "summary-only" | "conversation-fork"; alwaysAsk?: boolean; maxPromptChars?: number };
   elicitation?: { enabled?: boolean; form?: boolean; url?: boolean; alwaysAsk?: boolean; timeoutMs?: number };
   approval?: McpApprovalSettings;
+  outputGuard?: McpOutputGuardSettings;
   [key: string]: unknown;
 }
 

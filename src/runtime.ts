@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { emptyMetadataCache, getMetadataCachePath, loadMetadataCache, saveMetadataCache, updateServerCache, type CachedResource, type CachedTool, type MetadataCache } from "./core/cache.js";
+import { guardMcpOutput } from "./core/output-guard.js";
 import { renderCallToolResult, renderReadResourceResult } from "./core/result-renderer.js";
 import { loadMcpConfig, type McpConfig, type ServerEntry } from "./core/config.js";
 import { createProxyState, type ProxyState } from "./features/tool-catalog.js";
@@ -32,6 +33,10 @@ export interface ConnectRefreshResult {
   state: ProxyState;
 }
 
+export interface RuntimeCallOptions {
+  maxOutput?: number;
+}
+
 export type CallToolResult =
   | { ok: true; target: ToolTarget; output: string; isError: boolean }
   | { ok: false; message: string };
@@ -40,7 +45,7 @@ export interface AdapterRuntime {
   manager: McpServerManager;
   loadState(ctx: RuntimeToolContext): ProxyState;
   connectAndRefresh(ctx: RuntimeToolContext, serverName: string): Promise<ConnectRefreshResult>;
-  callTool(ctx: RuntimeToolContext, state: ProxyState, toolName: string, args: Record<string, unknown>): Promise<CallToolResult>;
+  callTool(ctx: RuntimeToolContext, state: ProxyState, toolName: string, args: Record<string, unknown>, options?: RuntimeCallOptions): Promise<CallToolResult>;
   closeAll(): Promise<void>;
 }
 
@@ -123,7 +128,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
     async connectAndRefresh(ctx, serverName) {
       return connectAndRefreshServer(ctx, serverName);
     },
-    async callTool(ctx, state, toolName, args) {
+    async callTool(ctx, state, toolName, args, callOptions) {
       if (ctx.signal?.aborted) return { ok: false, message: "MCP request cancelled." };
 
       const resolved = await resolveTargetWithLazyRefresh(ctx, state, toolName);
@@ -132,12 +137,22 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
       const target = resolved.target;
       const definition = resolved.state.config.mcpServers[target.serverName];
       if (!definition) return { ok: false, message: `Server "${target.serverName}" is not configured. Use /lmcp status to list configured servers.` };
+      const guardOutput = (output: string, rawResult: unknown) => guardMcpOutput(output, rawResult, {
+        home,
+        serverName: target.serverName,
+        toolName: target.exposedName,
+        settings: resolved.state.config.settings?.outputGuard,
+        maxOutput: callOptions?.maxOutput,
+        now: now(),
+      });
 
       try {
         const connection = await manager.connect(target.serverName, definition, { cwd: ctx.cwd, home, env, signal: ctx.signal, timeoutMs });
         if (target.isResource && target.resourceUri) {
           const result = await connection.client.readResource({ uri: target.resourceUri }, { signal: ctx.signal, timeout: timeoutMs });
-          return { ok: true, target, output: renderReadResourceResult(result), isError: false };
+          const rendered = renderReadResourceResult(result);
+          const output = [`Read resource "${target.resourceUri}" from "${target.serverName}".`, "", rendered].join("\n").trimEnd();
+          return { ok: true, target, output: await guardOutput(output, result), isError: false };
         }
 
         const result = await connection.client.callTool(
@@ -146,13 +161,18 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
           { signal: ctx.signal, timeout: timeoutMs },
         );
         const rendered = renderCallToolResult(result);
-        return { ok: true, target, output: rendered.text, isError: rendered.isError };
+        const heading = rendered.isError
+          ? `MCP tool "${target.exposedName}" on "${target.serverName}" returned an error.`
+          : `Called "${target.exposedName}" on "${target.serverName}".`;
+        const output = [heading, "", rendered.text].join("\n").trimEnd();
+        return { ok: true, target, output: await guardOutput(output, result), isError: rendered.isError };
       } catch (error) {
         if (error instanceof ServerNotConfiguredError || error instanceof UnsupportedTransportError || error instanceof InvalidServerConfigError) {
           return { ok: false, message: error.message };
         }
         const message = error instanceof Error ? error.message : String(error);
-        return { ok: false, message: `Failed to call MCP tool "${target.exposedName}" on "${target.serverName}": ${message}` };
+        const output = `Failed to call MCP tool "${target.exposedName}" on "${target.serverName}": ${message}`;
+        return { ok: false, message: await guardOutput(output, { error: message }) };
       }
     },
     async closeAll() {

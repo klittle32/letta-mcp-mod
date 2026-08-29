@@ -1,4 +1,5 @@
 import type { LettaToolDefinition } from "../mod.js";
+import { MAX_MAX_OUTPUT_CHARS, MIN_MAX_OUTPUT_CHARS } from "../core/output-guard.js";
 import type { AdapterRuntime, RuntimeToolContext } from "../runtime.js";
 import {
   executeSearch,
@@ -9,6 +10,7 @@ import {
 export interface CallToolArgs {
   name: string;
   args: Record<string, unknown>;
+  maxOutput?: number;
 }
 
 export const SEARCH_TOOLS_PARAMETERS = {
@@ -40,6 +42,12 @@ export const CALL_TOOL_PARAMETERS = {
       type: "object",
       description: "Arguments matching the tool's input schema from search_tools.",
       additionalProperties: true,
+    },
+    maxOutput: {
+      type: "integer",
+      minimum: MIN_MAX_OUTPUT_CHARS,
+      maximum: MAX_MAX_OUTPUT_CHARS,
+      description: "Optional character limit for this result. Defaults to the configured output guard.",
     },
   },
   required: ["name", "args"],
@@ -92,7 +100,13 @@ export function createCallToolTool(runtime: AdapterRuntime): LettaToolDefinition
 
       const runtimeCtx: RuntimeToolContext = { cwd: ctx.cwd, signal: ctx.signal };
       const state = runtime.loadState(runtimeCtx);
-      const result = await runtime.callTool(runtimeCtx, state, parsed.value.name, parsed.value.args);
+      const result = await runtime.callTool(
+        runtimeCtx,
+        state,
+        parsed.value.name,
+        parsed.value.args,
+        parsed.value.maxOutput === undefined ? undefined : { maxOutput: parsed.value.maxOutput },
+      );
       return formatRuntimeCallToolResult(result);
     },
   };
@@ -125,7 +139,26 @@ function parseCallArgs(args: Record<string, unknown> | undefined):
   if (!isRecord(toolArgs)) {
     return { ok: false, message: "call_tool args must be an object matching the tool's input schema." };
   }
-  return { ok: true, value: { name, args: toolArgs } };
+  const maxOutput = args?.maxOutput;
+  if (maxOutput !== undefined && (
+    typeof maxOutput !== "number"
+    || !Number.isInteger(maxOutput)
+    || maxOutput < MIN_MAX_OUTPUT_CHARS
+    || maxOutput > MAX_MAX_OUTPUT_CHARS
+  )) {
+    return {
+      ok: false,
+      message: `call_tool maxOutput must be an integer from ${MIN_MAX_OUTPUT_CHARS} to ${MAX_MAX_OUTPUT_CHARS}.`,
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      name,
+      args: toolArgs,
+      ...(typeof maxOutput === "number" ? { maxOutput } : {}),
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

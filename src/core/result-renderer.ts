@@ -1,28 +1,20 @@
-export interface RenderOptions {
-  maxTextChars?: number;
-  maxJsonChars?: number;
-}
-
 interface RenderedCallToolResult {
   text: string;
   isError: boolean;
 }
 
-const DEFAULT_MAX_TEXT_CHARS = 20_000;
-const DEFAULT_MAX_JSON_CHARS = 8_000;
-
-export function renderCallToolResult(result: unknown, options: RenderOptions = {}): RenderedCallToolResult {
+export function renderCallToolResult(result: unknown): RenderedCallToolResult {
   const record = isRecord(result) ? result : {};
   const parts: string[] = [];
   const content = Array.isArray(record.content) ? record.content : [];
 
   for (const block of content) {
-    const rendered = renderToolContentBlock(block, options);
+    const rendered = renderToolContentBlock(block);
     if (rendered) parts.push(rendered);
   }
 
   if ("structuredContent" in record && record.structuredContent !== undefined) {
-    parts.push(["Structured content:", renderJson(record.structuredContent, options)].join("\n"));
+    parts.push(["Structured content:", renderJson(record.structuredContent)].join("\n"));
   }
 
   return {
@@ -31,25 +23,25 @@ export function renderCallToolResult(result: unknown, options: RenderOptions = {
   };
 }
 
-export function renderReadResourceResult(result: unknown, options: RenderOptions = {}): string {
+export function renderReadResourceResult(result: unknown): string {
   const record = isRecord(result) ? result : {};
   const contents = Array.isArray(record.contents) ? record.contents : [];
   const multiple = contents.length > 1;
-  const parts = contents.map((content) => renderResourceContent(content, options, multiple)).filter(Boolean);
+  const parts = contents.map((content) => renderResourceContent(content, multiple)).filter(Boolean);
   return parts.length > 0 ? parts.join("\n\n") : "(no resource content)";
 }
 
-function renderToolContentBlock(block: unknown, options: RenderOptions): string {
-  if (!isRecord(block)) return renderJson(block, options);
+function renderToolContentBlock(block: unknown): string {
+  if (!isRecord(block)) return renderJson(block);
   switch (block.type) {
     case "text":
-      return truncateText(typeof block.text === "string" ? block.text : "", options);
+      return typeof block.text === "string" ? block.text : "";
     case "image":
       return `[image content: ${typeof block.mimeType === "string" ? block.mimeType : "unknown MIME"}, ${base64Length(block.data)} chars base64]`;
     case "audio":
       return `[audio content: ${typeof block.mimeType === "string" ? block.mimeType : "unknown MIME"}, ${base64Length(block.data)} chars base64]`;
     case "resource":
-      return renderResourceContent(block.resource, options, true);
+      return renderResourceContent(block.resource, true);
     case "resource_link": {
       const name = typeof block.name === "string" ? block.name : "unnamed";
       const uri = typeof block.uri === "string" ? block.uri : "unknown URI";
@@ -57,43 +49,30 @@ function renderToolContentBlock(block: unknown, options: RenderOptions): string 
       return `[resource link: ${name} ${uri}${mime}]`;
     }
     default:
-      return renderJson(block, options);
+      return renderJson(block);
   }
 }
 
-function renderResourceContent(content: unknown, options: RenderOptions, includeHeading: boolean): string {
-  if (!isRecord(content)) return renderJson(content, options);
+function renderResourceContent(content: unknown, includeHeading: boolean): string {
+  if (!isRecord(content)) return renderJson(content);
   const uri = typeof content.uri === "string" ? content.uri : "unknown URI";
   const mime = typeof content.mimeType === "string" ? content.mimeType : undefined;
   if (typeof content.text === "string") {
-    const renderedText = truncateText(content.text, options);
-    if (!includeHeading) return renderedText;
-    return [`Resource: ${uri}${mime ? ` (${mime})` : ""}`, renderedText].join("\n");
+    if (!includeHeading) return content.text;
+    return [`Resource: ${uri}${mime ? ` (${mime})` : ""}`, content.text].join("\n");
   }
   if (typeof content.blob === "string") {
     return `[blob content: ${uri}${mime ? ` (${mime})` : ""}, ${content.blob.length} chars base64]`;
   }
-  return renderJson(content, options);
+  return renderJson(content);
 }
 
-function renderJson(value: unknown, options: RenderOptions): string {
-  let json: string;
+function renderJson(value: unknown): string {
   try {
-    json = JSON.stringify(value, null, 2);
+    return JSON.stringify(value, null, 2);
   } catch {
-    json = String(value);
+    return String(value);
   }
-  return truncate(json, options.maxJsonChars ?? DEFAULT_MAX_JSON_CHARS);
-}
-
-function truncateText(value: string, options: RenderOptions): string {
-  return truncate(value, options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS);
-}
-
-function truncate(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  const omitted = value.length - maxChars;
-  return `${value.slice(0, maxChars)}\n\n[truncated ${omitted} characters]`;
 }
 
 function base64Length(value: unknown): number {

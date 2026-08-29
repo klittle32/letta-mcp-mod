@@ -53,17 +53,19 @@ describe("renderCallToolResult", () => {
     expect(rendered).toBe("[resource link: Fixture README fixture://readme (text/plain)]");
   });
 
-  it("truncates long text with a note", () => {
-    const rendered = renderCallToolResult({ content: [{ type: "text", text: "abcdef" }] }, { maxTextChars: 3 }).text;
+  it("keeps long text intact for the aggregate output guard", () => {
+    const value = "abcdef".repeat(5_000);
+    const rendered = renderCallToolResult({ content: [{ type: "text", text: value }] }).text;
 
-    expect(rendered).toBe("abc\n\n[truncated 3 characters]");
+    expect(rendered).toBe(value);
   });
 
-  it("truncates long JSON with a note", () => {
-    const rendered = renderCallToolResult({ content: [], structuredContent: { value: "abcdef" } }, { maxJsonChars: 10 }).text;
+  it("keeps structured JSON intact for the aggregate output guard", () => {
+    const value = "abcdef".repeat(2_000);
+    const rendered = renderCallToolResult({ content: [], structuredContent: { value } }).text;
 
     expect(rendered).toContain("Structured content:");
-    expect(rendered).toContain("[truncated");
+    expect(rendered).toContain(value);
   });
 
   it("renders unknown blocks as bounded JSON", () => {

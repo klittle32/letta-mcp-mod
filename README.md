@@ -9,6 +9,7 @@ A Letta Code port of the `pi-mcp-adapter` pattern: a lazy, context-efficient MCP
 - A human `/lmcp` slash command for setup, status, cached tool listing, reconnects, and OAuth actions.
 - Lazy MCP connections: activation reads local config/cache but does not start MCP server processes or perform HTTP MCP network work.
 - Transparent metadata refresh when search needs current information.
+- Aggregate output guarding with private spill files for oversized results.
 - Metadata caching under `~/.letta/mcp-adapter/cache.json`.
 - Stdio, streamable HTTP, and SSE MCP transports.
 - HTTP bearer auth and OAuth authorization-code / client-credentials flows.
@@ -344,7 +345,8 @@ search_tools({
 
 call_tool({
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  maxOutput?: number // 1,000-1,000,000 characters for this call
 })
 ```
 
@@ -364,6 +366,37 @@ call_tool({
 `call_tool` accepts the callable name returned by search and a normal object matching that result's schema. It connects lazily and supports stdio, HTTP, and synthetic resource tools through the same interface.
 
 Setup, status, explicit reconnects, and OAuth are intentionally human-facing `/lmcp` operations rather than model tool modes.
+
+## Output guard and retained results
+
+Every MCP tool and resource result is measured after its complete model-facing output has been assembled. Results up to 40,000 characters are returned unchanged by default. Larger results return a bounded preview and a path to the complete private artifact:
+
+```text
+Output truncated (82431 chars). Full result: ~/.letta/mcp-adapter/results/<server>/<tool>-<timestamp>.txt. Use the file tools to read more.
+```
+
+Actual paths are absolute. Text spills use `.txt`; structured results use complete `.json`; oversized image, audio, and resource blobs are decoded to MIME-appropriate files rather than placing base64 in model context. Direct tools and synthetic resource tools use the same guard.
+
+Set a project or global default in MCP configuration:
+
+```json
+{
+  "settings": {
+    "outputGuard": {
+      "maxChars": 40000,
+      "maxFiles": 100,
+      "maxAgeMs": 604800000
+    }
+  },
+  "mcpServers": {}
+}
+```
+
+- `maxChars` must be between 1,000 and 1,000,000.
+- `maxFiles` defaults to 100 retained artifacts.
+- `maxAgeMs` defaults to 7 days.
+- `call_tool.maxOutput` overrides `maxChars` for one call and is not passed to the MCP server.
+- Spill directories and files are created with private permissions. Retention cleanup is best-effort and runs after a spill.
 
 ## Permission behavior
 
@@ -413,5 +446,6 @@ MCP UI resource hints such as `_meta["openai/outputTemplate"]` / `_meta.uiResour
 - Activation does not eagerly connect to MCP servers.
 - `search_tools` may start configured stdio processes or make configured network requests when metadata is missing or stale; these connections are opened only on demand.
 - Search results are bounded to 50 and default to 10.
+- Tool and resource results are bounded to 40,000 characters by default; complete oversized results are retained under `~/.letta/mcp-adapter/results/`.
 - Sampling and elicitation settings are reserved but not advertised to MCP servers yet. The current Letta mod API does not provide a safe scoped conversation/form-input mechanism inside manager-owned MCP request handlers.
 - Secrets should be provided via environment variables. Do not commit `.env`, bearer tokens, OAuth client secrets, or generated auth stores.

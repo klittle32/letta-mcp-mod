@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAdapterRuntime } from "../src/runtime.js";
@@ -12,7 +12,7 @@ function tempWorkspace() {
   return { root, home, cwd };
 }
 
-function writeWorkspaceConfig(cwd: string, servers = ["fixture"]) {
+function writeWorkspaceConfig(cwd: string, servers = ["fixture"], settings?: Record<string, unknown>) {
   const mcpServers: Record<string, unknown> = {};
   if (servers.includes("fixture")) {
     mcpServers.fixture = {
@@ -23,7 +23,11 @@ function writeWorkspaceConfig(cwd: string, servers = ["fixture"]) {
   if (servers.includes("remote")) {
     mcpServers.remote = { url: "http://localhost:3000/mcp" };
   }
-  writeFileSync(join(cwd, ".mcp.json"), JSON.stringify({ mcpServers }, null, 2));
+  writeFileSync(join(cwd, ".mcp.json"), JSON.stringify({ mcpServers, ...(settings ? { settings } : {}) }, null, 2));
+}
+
+function artifactPath(output: string): string | undefined {
+  return output.match(/Full result: (.+)\. Use the file tools to read more\./)?.[1];
 }
 
 describe("adapter runtime callTool", () => {
@@ -39,7 +43,7 @@ describe("adapter runtime callTool", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.target.serverName).toBe("fixture");
-      expect(result.output).toBe("hello");
+      expect(result.output).toBe('Called "fixture_echo" on "fixture".\n\nhello');
       expect(result.isError).toBe(false);
     }
     expect(runtime.manager.getConnection("fixture")?.status).toBe("connected");
@@ -55,7 +59,7 @@ describe("adapter runtime callTool", () => {
     const result = await runtime.callTool({ cwd }, state, "fixture_echo", { message: "hello" });
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.output).toBe("hello");
+    if (result.ok) expect(result.output).toBe('Called "fixture_echo" on "fixture".\n\nhello');
     expect(runtime.loadState({ cwd }).servers.get("fixture")?.tools.map((tool) => tool.name)).toContain("fixture_echo");
     await runtime.closeAll();
   });
@@ -69,7 +73,7 @@ describe("adapter runtime callTool", () => {
     const result = await runtime.callTool({ cwd, serverName: "fixture" }, state, "echo", { message: "hi" });
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.output).toBe("hi");
+    if (result.ok) expect(result.output).toBe('Called "fixture_echo" on "fixture".\n\nhi');
     await runtime.closeAll();
   });
 
@@ -85,7 +89,7 @@ describe("adapter runtime callTool", () => {
       { message: "already parsed" },
     );
 
-    expect(result).toMatchObject({ ok: true, output: "already parsed" });
+    expect(result).toMatchObject({ ok: true, output: 'Called "fixture_echo" on "fixture".\n\nalready parsed' });
     await runtime.closeAll();
   });
 
@@ -112,7 +116,7 @@ describe("adapter runtime callTool", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.isError).toBe(true);
-      expect(result.output).toBe("fixture failure");
+      expect(result.output).toBe('MCP tool "fixture_fail_soft" on "fixture" returned an error.\n\nfixture failure');
     }
     await runtime.closeAll();
   });
@@ -139,7 +143,7 @@ describe("adapter runtime callTool", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.target.isResource).toBe(true);
-      expect(result.output).toBe("Fixture README content");
+      expect(result.output).toBe('Read resource "fixture://readme" from "fixture".\n\nFixture README content');
     }
     await runtime.closeAll();
   });
@@ -167,5 +171,51 @@ describe("adapter runtime callTool", () => {
 
     await runtime.closeAll();
     expect(runtime.manager.getConnection("fixture")).toBeUndefined();
+  });
+
+  it("applies the configured aggregate limit and preserves the full result", async () => {
+    const { home, cwd } = tempWorkspace();
+    writeWorkspaceConfig(cwd, ["fixture"], { outputGuard: { maxChars: 1_000 } });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    const message = "configured-limit-".repeat(100);
+
+    const result = await runtime.callTool(
+      { cwd },
+      runtime.loadState({ cwd }),
+      "fixture_echo",
+      { message },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output.length).toBeLessThanOrEqual(1_000);
+      const path = artifactPath(result.output);
+      expect(path).toBeTruthy();
+      expect(readFileSync(path!, "utf8")).toBe(`Called "fixture_echo" on "fixture".\n\n${message}`);
+    }
+    await runtime.closeAll();
+  });
+
+  it("lets a per-call maxOutput override the configured limit", async () => {
+    const { home, cwd } = tempWorkspace();
+    writeWorkspaceConfig(cwd, ["fixture"], { outputGuard: { maxChars: 5_000 } });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    const message = "override-limit-".repeat(100);
+
+    const result = await runtime.callTool(
+      { cwd },
+      runtime.loadState({ cwd }),
+      "fixture_echo",
+      { message },
+      { maxOutput: 1_000 },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output).toContain("Output truncated (");
+      const path = artifactPath(result.output);
+      expect(readFileSync(path!, "utf8")).toContain(message);
+    }
+    await runtime.closeAll();
   });
 });

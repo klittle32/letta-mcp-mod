@@ -218,6 +218,7 @@ describe("split model tool definitions", () => {
       properties: {
         name: { type: "string" },
         args: { type: "object", additionalProperties: true },
+        maxOutput: { type: "integer", minimum: 1_000, maximum: 1_000_000 },
       },
     });
     expect(tool.requiresApproval).toBe(true);

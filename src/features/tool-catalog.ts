@@ -184,13 +184,7 @@ function scoreToolMatch(serverName: string, tool: ToolMetadata, query: string, t
 
 export function formatRuntimeCallToolResult(result: CallToolResult): string {
   if (!result.ok) return result.message;
-  if (result.target.isResource && result.target.resourceUri) {
-    return [`Read resource "${result.target.resourceUri}" from "${result.target.serverName}".`, "", result.output].join("\n").trimEnd();
-  }
-  if (result.isError) {
-    return [`MCP tool "${result.target.exposedName}" on "${result.target.serverName}" returned an error.`, "", result.output].join("\n").trimEnd();
-  }
-  return [`Called "${result.target.exposedName}" on "${result.target.serverName}".`, "", result.output].join("\n").trimEnd();
+  return result.output;
 }
 
 function formatToolListItem(tool: ToolMetadata): string {

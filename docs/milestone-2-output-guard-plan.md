@@ -1,6 +1,6 @@
 # Milestone 2: Aggregate MCP Output Guard
 
-Status: implementation authorized
+Status: implemented
 
 Issue: [#10](https://github.com/klittle32/letta-mcp-mod/issues/10)
 
@@ -120,3 +120,14 @@ directories.
 4. Spill files are private, discoverable from the returned notice, and pruned.
 5. Structured and binary/resource cases preserve their original forms.
 6. Focused tests, the full suite, typechecking, and the bundled build pass.
+
+## Verification
+
+- Aggregate guard tests cover defaults, overrides, unchanged small output,
+  multi-block text, structured JSON, `readResource` text, decoded binary
+  resources, retention, private permissions, and write failures.
+- Runtime integration tests cover configured and per-call limits through a real
+  stdio MCP server.
+- Full suite: 302 tests passing across 25 files.
+- `bun run typecheck` passes.
+- `bun run build` produces `dist/letta-mcp-adapter.mjs`.
