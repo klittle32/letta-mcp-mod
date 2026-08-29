@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { computeServerHash, loadMetadataCache } from "../src/core/cache.js";
 import { executeMcpCommand } from "../src/features/mcp-command.js";
-import { loadOAuthStore } from "../src/mcp/oauth-store.js";
+import { getOAuthCredentials, loadOAuthStore } from "../src/mcp/oauth-store.js";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { startOAuthFixture } from "./helpers/oauth-fixture.js";
 
@@ -63,10 +63,10 @@ describe("adapter runtime OAuth integration", () => {
       const redirectUrl = await fixture.authorize(authorizationUrl!);
       const complete = await executeMcpCommand(`auth-complete remote ${redirectUrl}`, runtime, { cwd });
       expect(complete).toContain("OAuth authorization complete");
-      expect(loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })?.tokens?.access_token).toBe("fixture-access-token");
+      expect(getOAuthCredentials(loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url }))?.tokens?.access_token).toBe("fixture-access-token");
 
       const refreshed = await runtime.connectAndRefresh({ cwd }, "remote");
-      expect(refreshed.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen"]);
+      expect(refreshed.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen", "requires_write"]);
       expect(refreshed.state.servers.get("remote")?.cacheEntry?.cachedAt).toBe(1234);
 
       const cachedState = runtime.loadState({ cwd });
@@ -76,6 +76,35 @@ describe("adapter runtime OAuth integration", () => {
         ok: true,
         output: 'Called "remote_echo" on "remote".\n\nhello oauth',
       });
+    } finally {
+      await runtime.closeAll();
+      await fixture.stop();
+    }
+  });
+
+  it("turns an insufficient-scope challenge into a bounded union-scope authorization", async () => {
+    const fixture = await startOAuthFixture();
+    const { home, cwd } = tempWorkspace();
+    writeConfig(cwd, fixture, { scope: "read" });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    try {
+      await executeMcpCommand("auth-start remote", runtime, { cwd });
+      const redirectUrl = await fixture.authorize(loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })!.authorizationUrl!);
+      await executeMcpCommand(`auth-complete remote ${redirectUrl}`, runtime, { cwd });
+      await runtime.connectAndRefresh({ cwd }, "remote");
+      const state = runtime.loadState({ cwd });
+
+      const result = await runtime.callTool({ cwd }, state, "remote_requires_write", {});
+      const observations = await fixture.observations();
+
+      expect({ result, mcpRequests: observations.mcpRequests }).toMatchObject({
+        result: { ok: false },
+        mcpRequests: expect.arrayContaining([
+          expect.objectContaining({ method: "tools/call", tool: "requires_write", token: "fixture-access-token" }),
+        ]),
+      });
+      const authorizationUrl = loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })!.authorizationUrl!;
+      expect(new Set(new URL(authorizationUrl).searchParams.get("scope")?.split(" "))).toEqual(new Set(["read", "write"]));
     } finally {
       await runtime.closeAll();
       await fixture.stop();

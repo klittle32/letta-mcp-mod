@@ -1,9 +1,19 @@
-import { auth, type OAuthTokens } from "@modelcontextprotocol/client";
+import {
+  AuthorizationServerMismatchError,
+  IssuerMismatchError,
+  auth,
+} from "@modelcontextprotocol/client";
 import type { AdapterRuntime, RuntimeToolContext } from "../runtime.js";
 import { InvalidServerConfigError } from "../mcp/errors.js";
 import { resolveHttpUrl } from "../mcp/http.js";
 import { createOAuthProvider, isOAuthEnabled, parseOAuthRedirectUrl } from "../mcp/oauth-provider.js";
-import { clearOAuthCredentials, loadOAuthStore, redactOAuthMessage, saveOAuthStore } from "../mcp/oauth-store.js";
+import {
+  clearOAuthCredentials,
+  getOAuthCredentials,
+  hasOAuthCredential,
+  loadOAuthStore,
+  redactOAuthMessage,
+} from "../mcp/oauth-store.js";
 import type { ProxyState } from "./tool-catalog.js";
 
 export type OAuthAction = "auth-start" | "auth-complete" | "auth-status" | "auth-clear";
@@ -56,7 +66,10 @@ export async function executeAuthStart(options: {
       definition: prepared.definition,
       home: options.state.home,
     });
-    const result = await auth(provider, { serverUrl: prepared.serverUrl });
+    const result = await auth(provider, {
+      serverUrl: prepared.serverUrl,
+      scope: getOAuthConfig(prepared.definition).scope,
+    });
     if (result === "AUTHORIZED") {
       return [`OAuth authorization is available for "${prepared.serverName}".`, "", `Next: run /lmcp reconnect ${prepared.serverName}.`].join("\n");
     }
@@ -74,7 +87,7 @@ export async function executeAuthStart(options: {
       `Then reconnect with /lmcp reconnect ${prepared.serverName}.`,
     ].join("\n");
   } catch (error) {
-    return redactOAuthMessage(error);
+    return formatOAuthFailure(prepared.serverName, error);
   }
 }
 
@@ -85,68 +98,23 @@ async function executeClientCredentialsAuthStart(
   const config = getOAuthConfig(prepared.definition);
   if (!config.clientId) return `Server "${prepared.serverName}" OAuth client_credentials flow requires oauth.clientId.`;
   if (!config.clientSecret) return `Server "${prepared.serverName}" OAuth client_credentials flow requires oauth.clientSecret.`;
-  if (!config.tokenUrl) return `Server "${prepared.serverName}" OAuth client_credentials flow requires oauth.tokenUrl.`;
-
-  let tokenUrl: URL;
-  try {
-    tokenUrl = new URL(config.tokenUrl);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Server "${prepared.serverName}" has invalid oauth.tokenUrl: ${message}`;
-  }
-
-  const body = new URLSearchParams({ grant_type: "client_credentials", client_id: config.clientId, client_secret: config.clientSecret });
-  if (config.scope) body.set("scope", config.scope);
-  if (config.audience) body.set("audience", config.audience);
 
   try {
-    const response = await fetch(tokenUrl, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-      body,
+    const provider = createOAuthProvider({
+      serverName: prepared.serverName,
+      serverUrl: prepared.serverUrl,
+      definition: prepared.definition,
+      home: state.home,
     });
-    const payload = await safeReadJson(response);
-    if (!response.ok) {
-      const detail = summarizeOAuthTokenError(payload, response.status);
-      return redactOAuthMessage(`OAuth client_credentials token request failed for "${prepared.serverName}": ${detail}.`);
-    }
-    if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.access_token !== "string" || !payload.access_token) {
+    const result = await auth(provider, { serverUrl: prepared.serverUrl, scope: config.scope });
+    const tokens = await provider.tokens();
+    if (result !== "AUTHORIZED" || !tokens?.access_token) {
       return `OAuth client_credentials token response for "${prepared.serverName}" did not include an access token.`;
     }
-    const tokens = payload as OAuthTokens;
-    saveOAuthStore({
-      home: state.home,
-      serverName: prepared.serverName,
-      serverUrl: prepared.serverUrl.toString(),
-      store: {
-        version: 1,
-        serverName: prepared.serverName,
-        serverUrl: prepared.serverUrl.toString(),
-        updatedAt: Date.now(),
-        clientInformation: { client_id: config.clientId, client_secret: config.clientSecret },
-        tokens,
-      },
-    });
     return [`OAuth client_credentials token stored for "${prepared.serverName}".`, "", `Next: run /lmcp reconnect ${prepared.serverName}.`].join("\n");
   } catch (error) {
-    return redactOAuthMessage(error);
+    return formatOAuthFailure(prepared.serverName, error);
   }
-}
-
-async function safeReadJson(response: Response): Promise<Record<string, unknown> | undefined> {
-  try {
-    const value = await response.json();
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function summarizeOAuthTokenError(payload: Record<string, unknown> | undefined, status: number): string {
-  if (!payload) return `HTTP ${status}`;
-  const error = typeof payload.error === "string" ? payload.error : `HTTP ${status}`;
-  const description = typeof payload.error_description === "string" ? payload.error_description : undefined;
-  return description ? `${error} (${description})` : error;
 }
 
 export async function executeAuthComplete(options: {
@@ -163,21 +131,25 @@ export async function executeAuthComplete(options: {
 
   try {
     const provider = createOAuthProvider({ serverName: prepared.serverName, serverUrl: prepared.serverUrl, definition: prepared.definition, home: options.state.home });
-    const parsedRedirect = parsedArgs.code ? { code: parsedArgs.code, state: parsedArgs.state } : parseOAuthRedirectUrl(parsedArgs.redirectUrl!);
+    const parsedRedirect = parseOAuthRedirectUrl(parsedArgs.redirectUrl);
     if ("error" in parsedRedirect) {
-      return `OAuth authorization failed for "${prepared.serverName}": ${parsedRedirect.error}${parsedRedirect.errorDescription ? ` (${parsedRedirect.errorDescription})` : ""}.`;
+      return `OAuth authorization failed for "${prepared.serverName}": ${parsedRedirect.error}.`;
     }
     const expectedState = loadOAuthStore({ home: options.state.home, serverName: prepared.serverName, serverUrl: prepared.serverUrl.toString() })?.state;
     if (expectedState && parsedRedirect.state !== expectedState) {
       return `OAuth authorization failed for "${prepared.serverName}": state mismatch. Run auth-start again and complete the newest authorization URL.`;
     }
 
-    await auth(provider, { serverUrl: prepared.serverUrl, authorizationCode: parsedRedirect.code });
+    await auth(provider, {
+      serverUrl: prepared.serverUrl,
+      authorizationCode: parsedRedirect.code,
+      iss: parsedRedirect.iss,
+    });
     const tokens = await provider.tokens();
     if (!tokens?.access_token) return `OAuth authorization did not return an access token for "${prepared.serverName}". Run auth-start again.`;
     return [`OAuth authorization complete for "${prepared.serverName}".`, "", `Next: run /lmcp reconnect ${prepared.serverName}.`].join("\n");
   } catch (error) {
-    return redactOAuthMessage(error);
+    return formatOAuthFailure(prepared.serverName, error);
   }
 }
 
@@ -185,11 +157,16 @@ function executeAuthStatus(options: { serverName: string | undefined; state: Pro
   const prepared = prepareOAuthServer(options.state, options.serverName);
   if (!prepared.ok) return prepared.message;
   const store = loadOAuthStore({ home: options.state.home, serverName: prepared.serverName, serverUrl: prepared.serverUrl.toString() });
+  const activeCredentials = getOAuthCredentials(store);
+  const hasClientInformation = !!getOAuthConfig(prepared.definition).clientId
+    || !!activeCredentials?.clientInformation
+    || hasOAuthCredential(store, "clientInformation");
   return [
     `OAuth status for "${prepared.serverName}":`,
     `- configured: yes`,
-    `- tokens: ${store?.tokens ? "present" : "missing"}`,
-    `- client information: ${store?.clientInformation ? "present" : "missing"}`,
+    `- active issuer: ${store?.activeIssuer ?? "missing"}`,
+    `- tokens: ${activeCredentials?.tokens ? "present" : "missing"}`,
+    `- client information: ${hasClientInformation ? "present" : "missing"}`,
     `- pending authorization: ${store?.authorizationUrl ? "present" : "missing"}`,
     `- discovery state: ${store?.discoveryState ? "present" : "missing"}`,
   ].join("\n");
@@ -212,7 +189,7 @@ function prepareOAuthServer(
   }
 }
 
-function getOAuthConfig(definition: { oauth?: unknown }): { grantType?: string; clientId?: string; clientSecret?: string; tokenUrl?: string; scope?: string; audience?: string } {
+function getOAuthConfig(definition: { oauth?: unknown }): { grantType?: string; clientId?: string; clientSecret?: string; scope?: string; audience?: string } {
   return definition.oauth && typeof definition.oauth === "object" && !Array.isArray(definition.oauth) ? definition.oauth as Record<string, string | undefined> : {};
 }
 
@@ -221,7 +198,7 @@ function getOAuthGrantType(definition: { oauth?: unknown }): string {
 }
 
 function parseAuthCompleteArgs(rawArgs: string | undefined):
-  | { ok: true; redirectUrl?: string; code?: string; state?: string }
+  | { ok: true; redirectUrl: string }
   | { ok: false; message: string } {
   if (!rawArgs) return { ok: false, message: 'OAuth auth-complete requires args JSON: {"redirectUrl":"<full redirected URL>"}.' };
   let parsed: unknown;
@@ -235,6 +212,15 @@ function parseAuthCompleteArgs(rawArgs: string | undefined):
   }
   const record = parsed as Record<string, unknown>;
   if (typeof record.redirectUrl === "string" && record.redirectUrl.trim()) return { ok: true, redirectUrl: record.redirectUrl };
-  if (typeof record.code === "string" && record.code.trim()) return { ok: true, code: record.code, state: typeof record.state === "string" ? record.state : undefined };
   return { ok: false, message: 'OAuth auth-complete requires "redirectUrl" in args JSON.' };
+}
+
+function formatOAuthFailure(serverName: string, error: unknown): string {
+  if (error instanceof IssuerMismatchError) {
+    return `OAuth authorization failed for "${serverName}": authorization-server issuer mismatch. Run auth-clear, then start a new authorization.`;
+  }
+  if (error instanceof AuthorizationServerMismatchError) {
+    return `OAuth authorization failed for "${serverName}": the authorization server changed during login. Run auth-clear, then start a new authorization.`;
+  }
+  return redactOAuthMessage(error);
 }

@@ -2,8 +2,16 @@ import http from "node:http";
 import { Buffer } from "node:buffer";
 import { createMcpHandler, Server } from "@modelcontextprotocol/server";
 
-const issuedCodes = new Set();
+const issuedCodes = new Map();
 const validAccessTokens = new Set(["fixture-access-token", "fixture-access-token-refreshed", "fixture-client-credentials-token"]);
+const observations = {
+  resourceMetadataRequests: [],
+  authorizationMetadataRequests: 0,
+  authorizationRequests: [],
+  tokenRequests: [],
+  registrations: [],
+  mcpRequests: [],
+};
 
 function json(res, status, value, headers = {}) {
   res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(value));
@@ -45,6 +53,11 @@ function createFixtureServer(req) {
         description: "Report selected request headers",
         inputSchema: { type: "object", properties: {} },
       },
+      {
+        name: "requires_write",
+        description: "Require a write-scope step-up",
+        inputSchema: { type: "object", properties: {} },
+      },
     ],
   }));
 
@@ -57,6 +70,9 @@ function createFixtureServer(req) {
         authorization: req.headers.get("authorization") ? "present" : "missing",
         fixture: req.headers.get("x-fixture-header") ?? "missing",
       }) }] };
+    }
+    if (request.params.name === "requires_write") {
+      return { content: [{ type: "text", text: "write accepted" }] };
     }
     throw new Error(`Unknown tool: ${request.params.name}`);
   });
@@ -83,7 +99,8 @@ const httpServer = http.createServer(async (req, res) => {
   const origin = originFor(req);
   const url = new URL(req.url ?? "/", origin);
 
-  if (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/mcp") {
+  if (url.pathname === "/.well-known/oauth-protected-resource") {
+    observations.resourceMetadataRequests.push(url.pathname);
     json(res, 200, {
       resource: `${origin}/mcp`,
       authorization_servers: [origin],
@@ -94,6 +111,7 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === "/.well-known/oauth-authorization-server") {
+    observations.authorizationMetadataRequests += 1;
     json(res, 200, {
       issuer: origin,
       authorization_endpoint: `${origin}/authorize`,
@@ -104,7 +122,14 @@ const httpServer = http.createServer(async (req, res) => {
       token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
       code_challenge_methods_supported: ["S256"],
       scopes_supported: ["read", "write"],
+      authorization_response_iss_parameter_supported: true,
+      client_id_metadata_document_supported: true,
     });
+    return;
+  }
+
+  if (url.pathname === "/fixture-observations") {
+    json(res, 200, observations);
     return;
   }
 
@@ -114,18 +139,25 @@ const httpServer = http.createServer(async (req, res) => {
       text(res, 400, "missing redirect_uri");
       return;
     }
+    observations.authorizationRequests.push(Object.fromEntries(url.searchParams));
+    if (url.searchParams.get("resource") !== `${origin}/mcp`) {
+      text(res, 400, "invalid resource");
+      return;
+    }
     const code = `fixture-code-${issuedCodes.size + 1}`;
-    issuedCodes.add(code);
+    issuedCodes.set(code, url.searchParams.get("scope") ?? undefined);
     const redirect = new URL(redirectUri);
     redirect.searchParams.set("code", code);
     const state = url.searchParams.get("state");
     if (state) redirect.searchParams.set("state", state);
+    redirect.searchParams.set("iss", origin);
     res.writeHead(302, { location: redirect.toString() }).end();
     return;
   }
 
   if (url.pathname === "/register" && req.method === "POST") {
     const metadata = JSON.parse(await readBody(req));
+    observations.registrations.push(metadata);
     json(res, 201, {
       ...metadata,
       client_id: "fixture-dynamic-client",
@@ -137,6 +169,11 @@ const httpServer = http.createServer(async (req, res) => {
 
   if (url.pathname === "/token" && req.method === "POST") {
     const params = new URLSearchParams(await readBody(req));
+    observations.tokenRequests.push(Object.fromEntries(params));
+    if (params.get("resource") !== `${origin}/mcp`) {
+      json(res, 400, { error: "invalid_target", error_description: "invalid resource" });
+      return;
+    }
     const { clientId } = parseClientAuth(req, params);
     if (!clientId) {
       json(res, 401, { error: "invalid_client", error_description: "missing client" });
@@ -148,8 +185,15 @@ const httpServer = http.createServer(async (req, res) => {
         json(res, 400, { error: "invalid_grant", error_description: "unknown code" });
         return;
       }
+      const scope = issuedCodes.get(code);
       issuedCodes.delete(code);
-      json(res, 200, { access_token: "fixture-access-token", refresh_token: "fixture-refresh-token", token_type: "Bearer", expires_in: 3600 });
+      json(res, 200, {
+        access_token: "fixture-access-token",
+        refresh_token: "fixture-refresh-token",
+        token_type: "Bearer",
+        expires_in: 3600,
+        scope,
+      });
       return;
     }
     if (params.get("grant_type") === "refresh_token" && params.get("refresh_token") === "fixture-refresh-token") {
@@ -192,6 +236,26 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   const body = await readBody(req);
+  try {
+    const parsed = JSON.parse(body);
+    const requests = Array.isArray(parsed) ? parsed : [parsed];
+    observations.mcpRequests.push(...requests.map((request) => ({
+      method: request?.method,
+      tool: request?.params?.name,
+      token,
+    })));
+    if (
+      token === "fixture-access-token"
+      && requests.some((request) => request?.method === "tools/call" && request?.params?.name === "requires_write")
+    ) {
+      text(res, 403, "insufficient scope", {
+        "www-authenticate": `Bearer error="insufficient_scope", scope="write", resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
+      });
+      return;
+    }
+  } catch {
+    // Let the MCP handler return the protocol-level parse error.
+  }
   try {
     const response = await mcpHandler.fetch(toWebRequest(req, body));
     await sendWebResponse(res, response);

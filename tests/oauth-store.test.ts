@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   clearOAuthCredentials,
+  getOAuthCredentials,
   getOAuthAuthDir,
   getOAuthStorePaths,
   loadOAuthStore,
@@ -18,10 +19,11 @@ function tempHome() {
 
 function sampleStore(overrides: Partial<OAuthAuthStoreFile> = {}): OAuthAuthStoreFile {
   return {
-    version: 1,
+    version: 2,
     serverName: "linear",
     serverUrl: "https://example.com/mcp",
     updatedAt: 123,
+    credentials: {},
     ...overrides,
   };
 }
@@ -50,7 +52,18 @@ describe("OAuth auth store", () => {
 
   it("saved store round-trips and creates auth directory", () => {
     const home = tempHome();
-    const store = sampleStore({ tokens: { access_token: "access-token-test-value", token_type: "Bearer" } });
+    const store = sampleStore({
+      activeIssuer: "https://auth.example.com",
+      credentials: {
+        "https://auth.example.com": {
+          tokens: {
+            access_token: "access-token-test-value",
+            token_type: "Bearer",
+            issuer: "https://auth.example.com",
+          },
+        },
+      },
+    });
 
     saveOAuthStore({ home, serverName: "linear", serverUrl: "https://example.com/mcp", store });
 
@@ -94,8 +107,18 @@ describe("OAuth auth store", () => {
       serverName: "linear",
       serverUrl: "https://example.com/mcp",
       store: sampleStore({
-        clientInformation: { client_id: "client" },
-        tokens: { access_token: "access-token-test-value", refresh_token: "refresh-token-test-value", token_type: "Bearer" },
+        activeIssuer: "https://auth.example.com",
+        credentials: {
+          "https://auth.example.com": {
+            clientInformation: { client_id: "client", issuer: "https://auth.example.com" },
+            tokens: {
+              access_token: "access-token-test-value",
+              refresh_token: "refresh-token-test-value",
+              token_type: "Bearer",
+              issuer: "https://auth.example.com",
+            },
+          },
+        },
         discoveryState: { authorizationServerUrl: "https://auth.example.com" },
       }),
     });
@@ -103,8 +126,11 @@ describe("OAuth auth store", () => {
     clearOAuthCredentials({ home, serverName: "linear", serverUrl: "https://example.com/mcp", scope: "tokens" });
 
     const loaded = loadOAuthStore({ home, serverName: "linear", serverUrl: "https://example.com/mcp" });
-    expect(loaded?.tokens).toBeUndefined();
-    expect(loaded?.clientInformation).toEqual({ client_id: "client" });
+    expect(getOAuthCredentials(loaded)?.tokens).toBeUndefined();
+    expect(getOAuthCredentials(loaded)?.clientInformation).toEqual({
+      client_id: "client",
+      issuer: "https://auth.example.com",
+    });
     expect(loaded?.discoveryState).toEqual({ authorizationServerUrl: "https://auth.example.com" });
   });
 
@@ -118,8 +144,18 @@ describe("OAuth auth store", () => {
         state: "state",
         authorizationUrl: "https://auth.example.com/authorize",
         codeVerifier: "code-verifier-test-value",
-        clientInformation: { client_id: "client" },
-        tokens: { access_token: "access-token-test-value", refresh_token: "refresh-token-test-value", token_type: "Bearer" },
+        activeIssuer: "https://auth.example.com",
+        credentials: {
+          "https://auth.example.com": {
+            clientInformation: { client_id: "client", issuer: "https://auth.example.com" },
+            tokens: {
+              access_token: "access-token-test-value",
+              refresh_token: "refresh-token-test-value",
+              token_type: "Bearer",
+              issuer: "https://auth.example.com",
+            },
+          },
+        },
         discoveryState: { authorizationServerUrl: "https://auth.example.com" },
       }),
     });
@@ -127,12 +163,62 @@ describe("OAuth auth store", () => {
     clearOAuthCredentials({ home, serverName: "linear", serverUrl: "https://example.com/mcp", scope: "all" });
 
     const loaded = loadOAuthStore({ home, serverName: "linear", serverUrl: "https://example.com/mcp" });
-    expect(loaded).toMatchObject({ version: 1, serverName: "linear", serverUrl: "https://example.com/mcp" });
+    expect(loaded).toMatchObject({ version: 2, serverName: "linear", serverUrl: "https://example.com/mcp", credentials: {} });
     expect(loaded?.state).toBeUndefined();
     expect(loaded?.authorizationUrl).toBeUndefined();
     expect(loaded?.codeVerifier).toBeUndefined();
-    expect(loaded?.clientInformation).toBeUndefined();
-    expect(loaded?.tokens).toBeUndefined();
+    expect(getOAuthCredentials(loaded)?.clientInformation).toBeUndefined();
+    expect(getOAuthCredentials(loaded)?.tokens).toBeUndefined();
     expect(loaded?.discoveryState).toBeUndefined();
+  });
+
+  it("migrates issuer-bound version 1 credentials once", () => {
+    const home = tempHome();
+    const options = { home, serverName: "linear", serverUrl: "https://example.com/mcp" };
+    const paths = getOAuthStorePaths(options);
+    saveOAuthStore({ ...options, store: sampleStore() });
+    writeFileSync(paths.authFile, JSON.stringify({
+      version: 1,
+      serverName: "linear",
+      serverUrl: "https://example.com/mcp",
+      updatedAt: 123,
+      state: "pending-state",
+      clientInformation: { client_id: "legacy-client" },
+      tokens: { access_token: "legacy-token", token_type: "Bearer" },
+      discoveryState: { authorizationServerUrl: "https://auth.example.com/" },
+    }));
+
+    const migrated = loadOAuthStore(options);
+
+    expect(migrated).toMatchObject({
+      version: 2,
+      activeIssuer: "https://auth.example.com/",
+      state: "pending-state",
+    });
+    expect(getOAuthCredentials(migrated, "https://auth.example.com")).toEqual({
+      clientInformation: { client_id: "legacy-client", issuer: "https://auth.example.com/" },
+      tokens: { access_token: "legacy-token", token_type: "Bearer", issuer: "https://auth.example.com/" },
+    });
+    expect(JSON.parse(readFileSync(paths.authFile, "utf8")).version).toBe(2);
+  });
+
+  it("drops unbound version 1 credentials instead of guessing an issuer", () => {
+    const home = tempHome();
+    const options = { home, serverName: "linear", serverUrl: "https://example.com/mcp" };
+    const paths = getOAuthStorePaths(options);
+    saveOAuthStore({ ...options, store: sampleStore() });
+    writeFileSync(paths.authFile, JSON.stringify({
+      version: 1,
+      serverName: "linear",
+      serverUrl: "https://example.com/mcp",
+      updatedAt: 123,
+      codeVerifier: "pending-verifier",
+      tokens: { access_token: "unbound-token", token_type: "Bearer" },
+    }));
+
+    const migrated = loadOAuthStore(options);
+
+    expect(migrated?.credentials).toEqual({});
+    expect(migrated?.codeVerifier).toBe("pending-verifier");
   });
 });

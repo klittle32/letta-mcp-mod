@@ -22,6 +22,7 @@ export interface OAuthConfig {
   grantType?: "authorization_code" | "client_credentials";
   clientId?: string;
   clientSecret?: string;
+  clientMetadataUrl?: string;
   tokenUrl?: string;
   audience?: string;
   scope?: string;
@@ -217,6 +218,7 @@ function normalizeOAuthConfig(oauth: OAuthConfig, env: Record<string, string | u
     ...oauth,
     clientId: oauth.clientId !== undefined ? interpolateEnvVars(oauth.clientId, env) : undefined,
     clientSecret: oauth.clientSecret !== undefined ? interpolateEnvVars(oauth.clientSecret, env) : undefined,
+    clientMetadataUrl: oauth.clientMetadataUrl !== undefined ? interpolateEnvVars(oauth.clientMetadataUrl, env) : undefined,
     tokenUrl: oauth.tokenUrl !== undefined ? interpolateEnvVars(oauth.tokenUrl, env) : undefined,
     audience: oauth.audience !== undefined ? interpolateEnvVars(oauth.audience, env) : undefined,
     scope: oauth.scope !== undefined ? interpolateEnvVars(oauth.scope, env) : undefined,

@@ -1,19 +1,24 @@
 import { randomBytes } from "node:crypto";
 import type {
-  OAuthClientInformationMixed,
+  OAuthClientInformationContext,
   OAuthClientMetadata,
   OAuthClientProvider,
   OAuthDiscoveryState,
-  OAuthTokens,
+  StoredOAuthClientInformation,
+  StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
+import { validateClientMetadataUrl } from "@modelcontextprotocol/client";
 import type { ServerEntry, OAuthConfig } from "../core/config.js";
 import { InvalidServerConfigError } from "./errors.js";
 import {
   clearOAuthCredentials,
+  getOAuthCredentials,
   loadOAuthStore,
+  normalizeOAuthIssuer,
   saveOAuthStore,
   type OAuthAuthStoreFile,
   type OAuthCredentialScope,
+  type OAuthIssuerCredentials,
 } from "./oauth-store.js";
 
 export interface OAuthProviderOptions {
@@ -57,6 +62,7 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   readonly serverUrl: URL;
   readonly definition: ServerEntry;
   readonly home?: string;
+  readonly clientMetadataUrl?: string;
   private readonly now: () => number;
   private readonly config: OAuthConfig;
 
@@ -68,20 +74,34 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
     this.home = options.home;
     this.now = options.now ?? Date.now;
     this.config = getOAuthConfig(options.definition);
+    validateClientMetadataUrl(this.config.clientMetadataUrl);
+    this.clientMetadataUrl = this.config.clientMetadataUrl;
     if (this.config.grantType !== "client_credentials" && !this.config.redirectUri) {
       throw new InvalidServerConfigError(`Server "${options.serverName}" OAuth authorization_code flow requires oauth.redirectUri.`);
     }
   }
 
-  get redirectUrl(): string {
-    return this.config.redirectUri!;
+  get redirectUrl(): string | undefined {
+    return this.config.grantType === "client_credentials" ? undefined : this.config.redirectUri;
   }
 
   get clientMetadata(): OAuthClientMetadata {
+    if (this.config.grantType === "client_credentials") {
+      const metadata: OAuthClientMetadata = {
+        redirect_uris: [],
+        grant_types: ["client_credentials"],
+        application_type: "native",
+        client_name: this.config.clientName ?? "Letta MCP Adapter",
+      };
+      if (this.config.clientUri) metadata.client_uri = this.config.clientUri;
+      if (this.config.scope) metadata.scope = this.config.scope;
+      return metadata;
+    }
     const metadata: OAuthClientMetadata = {
-      redirect_uris: [this.redirectUrl],
+      redirect_uris: [this.redirectUrl!],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
+      application_type: "native",
       client_name: this.config.clientName ?? "Letta MCP Adapter",
     };
     if (this.config.clientUri) metadata.client_uri = this.config.clientUri;
@@ -97,23 +117,32 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
     return state;
   }
 
-  async clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
-    const stored = this.load()?.clientInformation;
-    if (stored) return stored;
-    if (!this.config.clientId) return undefined;
-    return this.config.clientSecret ? { client_id: this.config.clientId, client_secret: this.config.clientSecret } : { client_id: this.config.clientId };
+  async clientInformation(ctx?: OAuthClientInformationContext): Promise<StoredOAuthClientInformation | undefined> {
+    if (this.config.clientId) {
+      return {
+        client_id: this.config.clientId,
+        ...(this.config.clientSecret ? { client_secret: this.config.clientSecret } : {}),
+        ...(ctx?.issuer ? { issuer: ctx.issuer } : {}),
+      };
+    }
+    return getOAuthCredentials(this.load(), ctx?.issuer)?.clientInformation;
   }
 
-  async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
-    this.savePartial({ clientInformation });
+  async saveClientInformation(
+    clientInformation: StoredOAuthClientInformation,
+    ctx?: OAuthClientInformationContext,
+  ): Promise<void> {
+    const issuer = requireCredentialIssuer("client information", clientInformation.issuer, ctx?.issuer);
+    this.saveCredential(issuer, { clientInformation: { ...clientInformation, issuer } });
   }
 
-  async tokens(): Promise<OAuthTokens | undefined> {
-    return this.load()?.tokens;
+  async tokens(ctx?: OAuthClientInformationContext): Promise<StoredOAuthTokens | undefined> {
+    return getOAuthCredentials(this.load(), ctx?.issuer)?.tokens;
   }
 
-  async saveTokens(tokens: OAuthTokens): Promise<void> {
-    this.savePartial({ tokens });
+  async saveTokens(tokens: StoredOAuthTokens, ctx?: OAuthClientInformationContext): Promise<void> {
+    const issuer = requireCredentialIssuer("tokens", tokens.issuer, ctx?.issuer);
+    this.saveCredential(issuer, { tokens: { ...tokens, issuer } });
   }
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
@@ -135,7 +164,9 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
   }
 
   async saveDiscoveryState(discoveryState: OAuthDiscoveryState): Promise<void> {
-    this.savePartial({ discoveryState });
+    const activeIssuer = discoveryState.authorizationServerMetadata?.issuer
+      ?? discoveryState.authorizationServerUrl;
+    this.savePartial({ discoveryState, activeIssuer });
   }
 
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
@@ -144,6 +175,14 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
 
   get authorizationUrl(): string | undefined {
     return this.load()?.authorizationUrl;
+  }
+
+  prepareTokenRequest(scope?: string): URLSearchParams | undefined {
+    if (this.config.grantType !== "client_credentials") return undefined;
+    const params = new URLSearchParams({ grant_type: "client_credentials" });
+    if (scope) params.set("scope", scope);
+    if (this.config.audience) params.set("audience", this.config.audience);
+    return params;
   }
 
   private load(): OAuthAuthStoreFile | null {
@@ -160,12 +199,31 @@ export class FileOAuthClientProvider implements OAuthClientProvider {
     });
   }
 
+  private saveCredential(issuer: string, partial: OAuthIssuerCredentials): void {
+    const store = this.load() ?? this.emptyStore();
+    const key = normalizeOAuthIssuer(issuer);
+    saveOAuthStore({
+      home: this.home,
+      serverName: this.serverName,
+      serverUrl: this.serverUrl.toString(),
+      store: {
+        ...store,
+        activeIssuer: issuer,
+        credentials: {
+          ...store.credentials,
+          [key]: { ...store.credentials[key], ...partial },
+        },
+        updatedAt: this.now(),
+      },
+    });
+  }
+
   private emptyStore(): OAuthAuthStoreFile {
-    return { version: 1, serverName: this.serverName, serverUrl: this.serverUrl.toString(), updatedAt: this.now() };
+    return { version: 2, serverName: this.serverName, serverUrl: this.serverUrl.toString(), updatedAt: this.now(), credentials: {} };
   }
 }
 
-export function parseOAuthRedirectUrl(rawRedirectUrl: string): { code: string; state?: string } | { error: string; errorDescription?: string } {
+export function parseOAuthRedirectUrl(rawRedirectUrl: string): { code: string; state?: string; iss?: string } | { error: string; errorDescription?: string } {
   let url: URL;
   try {
     url = new URL(rawRedirectUrl);
@@ -179,7 +237,20 @@ export function parseOAuthRedirectUrl(rawRedirectUrl: string): { code: string; s
   }
   const code = url.searchParams.get("code");
   if (!code) throw new InvalidServerConfigError(`OAuth redirectUrl is missing required "code" query parameter.`);
-  return { code, state: url.searchParams.get("state") ?? undefined };
+  return {
+    code,
+    state: url.searchParams.get("state") ?? undefined,
+    iss: url.searchParams.get("iss") ?? undefined,
+  };
+}
+
+function requireCredentialIssuer(kind: string, stampedIssuer?: string, contextIssuer?: string): string {
+  const issuer = contextIssuer ?? stampedIssuer;
+  if (!issuer) throw new InvalidServerConfigError(`Cannot store OAuth ${kind} without an authorization-server issuer.`);
+  if (stampedIssuer && normalizeOAuthIssuer(stampedIssuer) !== normalizeOAuthIssuer(issuer)) {
+    throw new InvalidServerConfigError(`Cannot store OAuth ${kind} under a different authorization-server issuer.`);
+  }
+  return issuer;
 }
 
 function getOAuthConfig(definition: ServerEntry): OAuthConfig {

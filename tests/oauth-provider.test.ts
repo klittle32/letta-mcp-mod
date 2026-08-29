@@ -64,13 +64,18 @@ describe("OAuth provider", () => {
       client_name: "Letta MCP Adapter",
       client_uri: "https://client.example.com/app",
       scope: "read write",
+      application_type: "native",
     });
   });
 
   it("returns static client information from config", async () => {
     const provider = createOAuthProvider({ serverName: "linear", serverUrl: new URL("https://example.com/mcp"), definition: oauthDefinition(), home: tempHome() });
 
-    await expect(provider.clientInformation()).resolves.toEqual({ client_id: "client-id", client_secret: "client-secret-test-value" });
+    await expect(provider.clientInformation({ issuer: "https://auth.example.com" })).resolves.toEqual({
+      client_id: "client-id",
+      client_secret: "client-secret-test-value",
+      issuer: "https://auth.example.com",
+    });
   });
 
   it("saves and reloads dynamic client information", async () => {
@@ -78,10 +83,17 @@ describe("OAuth provider", () => {
     const definition = oauthDefinition({ oauth: { redirectUri: "http://127.0.0.1:3334/callback" } });
     const provider = createOAuthProvider({ serverName: "linear", serverUrl: new URL("https://example.com/mcp"), definition, home });
 
-    await provider.saveClientInformation({ client_id: "dynamic-client" });
+    await provider.saveClientInformation(
+      { client_id: "dynamic-client", issuer: "https://auth.example.com" },
+      { issuer: "https://auth.example.com" },
+    );
 
     const reloaded = createOAuthProvider({ serverName: "linear", serverUrl: new URL("https://example.com/mcp"), definition, home });
-    await expect(reloaded.clientInformation()).resolves.toEqual({ client_id: "dynamic-client" });
+    await expect(reloaded.clientInformation({ issuer: "https://auth.example.com" })).resolves.toEqual({
+      client_id: "dynamic-client",
+      issuer: "https://auth.example.com",
+    });
+    await expect(reloaded.clientInformation({ issuer: "https://other.example.com" })).resolves.toBeUndefined();
   });
 
   it("persists state, authorization URL, code verifier, tokens, and discovery state", async () => {
@@ -91,8 +103,11 @@ describe("OAuth provider", () => {
     const state = await provider.state();
     await provider.redirectToAuthorization(new URL("https://auth.example.com/authorize?state=abc"));
     await provider.saveCodeVerifier("code-verifier-test-value");
-    await provider.saveTokens({ access_token: "access-token-test-value", refresh_token: "refresh-token-test-value", token_type: "Bearer" });
     await provider.saveDiscoveryState({ authorizationServerUrl: "https://auth.example.com" });
+    await provider.saveTokens(
+      { access_token: "access-token-test-value", refresh_token: "refresh-token-test-value", token_type: "Bearer", issuer: "https://auth.example.com" },
+      { issuer: "https://auth.example.com" },
+    );
 
     const reloaded = new FileOAuthClientProvider({ serverName: "linear", serverUrl: new URL("https://example.com/mcp"), definition: oauthDefinition(), home });
     await expect(reloaded.state()).resolves.toBe(state);
@@ -106,7 +121,10 @@ describe("OAuth provider", () => {
     const home = tempHome();
     const provider = createOAuthProvider({ serverName: "linear", serverUrl: new URL("https://example.com/mcp"), definition: oauthDefinition(), home });
     await provider.saveCodeVerifier("code-verifier-test-value");
-    await provider.saveTokens({ access_token: "access-token-test-value", token_type: "Bearer" });
+    await provider.saveTokens(
+      { access_token: "access-token-test-value", token_type: "Bearer", issuer: "https://auth.example.com" },
+      { issuer: "https://auth.example.com" },
+    );
 
     await provider.invalidateCredentials("tokens");
 
@@ -114,14 +132,88 @@ describe("OAuth provider", () => {
     await expect(provider.codeVerifier()).resolves.toBe("code-verifier-test-value");
   });
 
+  it("keeps token records isolated when an MCP resource changes authorization issuers", async () => {
+    const home = tempHome();
+    const provider = createOAuthProvider({
+      serverName: "linear",
+      serverUrl: new URL("https://example.com/mcp"),
+      definition: oauthDefinition(),
+      home,
+    });
+    await provider.saveTokens(
+      { access_token: "issuer-a-token", token_type: "Bearer", issuer: "https://auth-a.example.com/" },
+      { issuer: "https://auth-a.example.com" },
+    );
+    await provider.saveTokens(
+      { access_token: "issuer-b-token", token_type: "Bearer", issuer: "https://auth-b.example.com" },
+      { issuer: "https://auth-b.example.com" },
+    );
+
+    await expect(provider.tokens({ issuer: "https://auth-a.example.com" })).resolves.toMatchObject({
+      access_token: "issuer-a-token",
+    });
+    await expect(provider.tokens({ issuer: "https://auth-b.example.com/" })).resolves.toMatchObject({
+      access_token: "issuer-b-token",
+    });
+    await expect(provider.tokens()).resolves.toMatchObject({ access_token: "issuer-b-token" });
+  });
+
   it("parses redirect URLs and OAuth redirect errors", () => {
-    expect(parseOAuthRedirectUrl("http://127.0.0.1/callback?code=authorization-code-test-value&state=state-value")).toEqual({
+    expect(parseOAuthRedirectUrl("http://127.0.0.1/callback?code=authorization-code-test-value&state=state-value&iss=https%3A%2F%2Fauth.example.com")).toEqual({
       code: "authorization-code-test-value",
       state: "state-value",
+      iss: "https://auth.example.com",
     });
     expect(parseOAuthRedirectUrl("http://127.0.0.1/callback?error=access_denied&error_description=Nope")).toEqual({
       error: "access_denied",
       errorDescription: "Nope",
+    });
+  });
+
+  it("supports CIMD and rejects unsafe metadata document URLs", () => {
+    const provider = createOAuthProvider({
+      serverName: "linear",
+      serverUrl: new URL("https://example.com/mcp"),
+      definition: oauthDefinition({ oauth: {
+        redirectUri: "http://127.0.0.1:3334/callback",
+        clientMetadataUrl: "https://client.example.com/oauth/client.json",
+      } }),
+    });
+
+    expect(provider.clientMetadataUrl).toBe("https://client.example.com/oauth/client.json");
+    expect(() => createOAuthProvider({
+      serverName: "linear",
+      serverUrl: new URL("https://example.com/mcp"),
+      definition: oauthDefinition({ oauth: {
+        redirectUri: "http://127.0.0.1:3334/callback",
+        clientMetadataUrl: "http://client.example.com/client.json",
+      } }),
+    })).toThrow(/clientMetadataUrl/i);
+  });
+
+  it("uses non-interactive native metadata for client credentials", () => {
+    const provider = createOAuthProvider({
+      serverName: "machine",
+      serverUrl: new URL("https://example.com/mcp"),
+      definition: oauthDefinition({ oauth: {
+        grantType: "client_credentials",
+        clientId: "client-id",
+        clientSecret: "client-secret-test-value",
+        audience: "api",
+        scope: "read",
+      } }),
+    });
+
+    expect(provider.redirectUrl).toBeUndefined();
+    expect(provider.clientMetadata).toMatchObject({
+      redirect_uris: [],
+      grant_types: ["client_credentials"],
+      application_type: "native",
+    });
+    expect(Object.fromEntries(provider.prepareTokenRequest("read")!)).toEqual({
+      grant_type: "client_credentials",
+      scope: "read",
+      audience: "api",
     });
   });
 });

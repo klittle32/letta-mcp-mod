@@ -5,6 +5,16 @@ export interface StartedOAuthFixture extends StartedHttpFixture {
   origin: string;
   redirectUri: string;
   authorize(authorizationUrl: string): Promise<string>;
+  observations(): Promise<OAuthFixtureObservations>;
+}
+
+export interface OAuthFixtureObservations {
+  resourceMetadataRequests: string[];
+  authorizationMetadataRequests: number;
+  authorizationRequests: Array<Record<string, string>>;
+  tokenRequests: Array<Record<string, string>>;
+  registrations: Array<Record<string, unknown>>;
+  mcpRequests: Array<{ method?: string; tool?: string; token?: string }>;
 }
 
 export async function startOAuthFixture(): Promise<StartedOAuthFixture> {
@@ -20,6 +30,11 @@ export async function startOAuthFixture(): Promise<StartedOAuthFixture> {
       if (!location) throw new Error(`OAuth fixture did not return a redirect location: HTTP ${response.status}`);
       await response.body?.cancel();
       return location;
+    },
+    async observations(): Promise<OAuthFixtureObservations> {
+      const response = await fetch(`${origin}/fixture-observations`);
+      if (!response.ok) throw new Error(`OAuth fixture observations failed: HTTP ${response.status}`);
+      return response.json() as Promise<OAuthFixtureObservations>;
     },
   };
 }

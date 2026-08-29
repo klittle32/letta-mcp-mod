@@ -118,6 +118,8 @@ export class McpServerManager {
     const transport = new StreamableHTTPClientTransport(url, {
       requestInit: { headers },
       authProvider: oauthProvider,
+      onInsufficientScope: resolveInsufficientScopeMode(definition),
+      maxStepUpRetries: 1,
     });
 
     try {
@@ -189,6 +191,12 @@ function resolveVersionNegotiationMode(protocolVersion: ServerEntry["protocolVer
   if (protocolVersion === "auto") return "auto";
   if (protocolVersion === "2026-07-28") return { pin: protocolVersion };
   return "legacy";
+}
+
+export function resolveInsufficientScopeMode(definition: ServerEntry): "reauthorize" | "throw" {
+  return definition.oauth && typeof definition.oauth === "object" && definition.oauth.grantType === "client_credentials"
+    ? "throw"
+    : "reauthorize";
 }
 
 function createConnectionRecord(

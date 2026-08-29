@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { startHttpFixture } from "./helpers/http-fixture.js";
 import { startOAuthFixture } from "./helpers/oauth-fixture.js";
 import { saveOAuthStore } from "../src/mcp/oauth-store.js";
-import { McpServerManager, InvalidServerConfigError } from "../src/mcp/manager.js";
+import { McpServerManager, InvalidServerConfigError, resolveInsufficientScopeMode } from "../src/mcp/manager.js";
 import { discoverServerMetadata, normalizeResources, normalizeTools } from "../src/mcp/metadata.js";
 import type { ServerEntry } from "../src/core/config.js";
 
@@ -14,6 +14,13 @@ const fixtureDefinition: ServerEntry = {
   command: process.execPath,
   args: [join(repoRoot, "tests/fixtures/stdio-mcp-fixture.mjs")],
 };
+
+describe("OAuth insufficient-scope mode", () => {
+  it("reauthorizes interactive flows and throws for client credentials", () => {
+    expect(resolveInsufficientScopeMode({ auth: "oauth", oauth: { redirectUri: "http://127.0.0.1/callback" } })).toBe("reauthorize");
+    expect(resolveInsufficientScopeMode({ auth: "oauth", oauth: { grantType: "client_credentials" } })).toBe("throw");
+  });
+});
 
 interface FixtureStats {
   methods: Record<string, number>;
@@ -368,11 +375,21 @@ describe("McpServerManager stdio", () => {
         serverName: "remote",
         serverUrl: fixture.url,
         store: {
-          version: 1,
+          version: 2,
           serverName: "remote",
           serverUrl: fixture.url,
           updatedAt: 123,
-          tokens: { access_token: "fixture-access-token", refresh_token: "fixture-refresh-token", token_type: "Bearer" },
+          activeIssuer: fixture.origin,
+          credentials: {
+            [fixture.origin]: {
+              tokens: {
+                access_token: "fixture-access-token",
+                refresh_token: "fixture-refresh-token",
+                token_type: "Bearer",
+                issuer: fixture.origin,
+              },
+            },
+          },
         },
       });
       await withManager(async (manager) => {

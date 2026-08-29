@@ -188,6 +188,8 @@ interface OAuthConfig {
   grantType?: "authorization_code" | "client_credentials";
   clientId?: string;
   clientSecret?: string;
+  clientMetadataUrl?: string;
+  /** Deprecated: token endpoints are discovered from OAuth metadata. */
   tokenUrl?: string;
   audience?: string;
   scope?: string;
@@ -470,6 +472,10 @@ Acceptance criteria:
 - Headless/manual OAuth works.
 - Token is persisted.
 - Reconnect succeeds after `auth-complete`.
+- Authorization and token requests carry the MCP resource indicator.
+- Callback issuers are validated before code exchange.
+- Clients and tokens are isolated by authorization-server issuer.
+- Client identity prefers configured IDs, then CIMD, then native DCR.
 
 ### Slice 7: Direct tools
 

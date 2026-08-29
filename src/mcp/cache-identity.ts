@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ServerEntry } from "../core/config.js";
 import { interpolateEnvVars } from "../core/config.js";
-import { loadOAuthStore } from "./oauth-store.js";
+import { getOAuthCredentials, loadOAuthStore } from "./oauth-store.js";
 
 export interface CacheIdentityOptions {
   serverName: string;
@@ -19,9 +19,10 @@ export function resolveCacheIdentityHash(options: CacheIdentityOptions): string 
       serverName: options.serverName,
       serverUrl: options.definition.url,
     });
-    const accessToken = store?.tokens?.access_token;
+    const credentials = getOAuthCredentials(store);
+    const accessToken = credentials?.tokens?.access_token;
     if (accessToken) {
-      const tokenRecord = store?.tokens as unknown as Record<string, unknown>;
+      const tokenRecord = credentials?.tokens as unknown as Record<string, unknown>;
       const discoveryRecord = store?.discoveryState as unknown as Record<string, unknown> | undefined;
       const claims = readJwtClaims(accessToken);
       const issuer = readString(tokenRecord?.issuer)

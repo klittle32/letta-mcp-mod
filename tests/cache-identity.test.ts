@@ -55,15 +55,20 @@ function saveOAuthToken(home: string, serverUrl: string, accessToken: string): v
     serverName: "remote",
     serverUrl,
     store: {
-      version: 1,
+      version: 2,
       serverName: "remote",
       serverUrl,
       updatedAt: 1,
-      tokens: {
-        access_token: accessToken,
-        token_type: "bearer",
-        issuer: "https://issuer.test",
-      } as never,
+      activeIssuer: "https://issuer.test",
+      credentials: {
+        "https://issuer.test": {
+          tokens: {
+            access_token: accessToken,
+            token_type: "bearer",
+            issuer: "https://issuer.test",
+          },
+        },
+      },
     },
   });
 }
