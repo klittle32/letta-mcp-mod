@@ -1,9 +1,11 @@
 import { createMcpCommand, type LettaCommandDefinition } from "./features/mcp-command.js";
 import { registerCachedDirectTools } from "./features/direct-tools.js";
+import { createCallToolTool, createSearchToolsTool } from "./features/model-tools.js";
 import { registerMcpPermissions, type LettaPermissionEvent, type PermissionCheckResult } from "./features/permissions.js";
-import { executeMcpProxy, MCP_PROXY_PARAMETERS, type McpProxyArgs } from "./features/proxy-tool.js";
 import { registerMcpStatusValues } from "./features/status-values.js";
 import { createAdapterRuntime, type AdapterRuntime } from "./runtime.js";
+
+export { createCallToolTool, createSearchToolsTool } from "./features/model-tools.js";
 
 export interface LettaToolRunContext {
   cwd: string;
@@ -57,23 +59,6 @@ export interface ActivateOptions {
   activationCwd?: string;
 }
 
-export function createMcpTool(runtime: AdapterRuntime = createAdapterRuntime()): LettaToolDefinition {
-  return {
-    name: "mcp",
-    description: "Use this compact MCP proxy to connect MCP servers, manage OAuth login, refresh cached metadata, search/list/describe cached MCP tools, and call MCP tools with JSON-string args.",
-    parameters: MCP_PROXY_PARAMETERS,
-    requiresApproval: true,
-    parallelSafe: false,
-    async run(ctx) {
-      if (ctx.signal?.aborted) return "MCP request cancelled.";
-      const proxyArgs = (ctx.args ?? {}) as McpProxyArgs;
-      const runtimeCtx = { cwd: ctx.cwd, args: proxyArgs, signal: ctx.signal };
-      const state = runtime.loadState(runtimeCtx);
-      return await executeMcpProxy(proxyArgs, state, runtime, runtimeCtx);
-    },
-  };
-}
-
 export default function activate(
   letta: LettaModApi,
   runtime: AdapterRuntime = createAdapterRuntime(),
@@ -88,7 +73,8 @@ export default function activate(
   disposers.push(...registerMcpStatusValues({ letta, runtime, activationCwd }));
 
   if (letta.capabilities?.tools && letta.tools) {
-    disposers.push(letta.tools.register(createMcpTool(runtime)));
+    disposers.push(letta.tools.register(createSearchToolsTool(runtime)));
+    disposers.push(letta.tools.register(createCallToolTool(runtime)));
     disposers.push(...registerCachedDirectTools({ letta, runtime, activationCwd }));
   }
 

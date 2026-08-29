@@ -91,7 +91,7 @@ describe("formatCommandHelp", () => {
 
 import { updateServerCache, type MetadataCache } from "../src/core/cache.js";
 import type { McpConfig, ServerEntry } from "../src/core/config.js";
-import { createProxyState, type ProxyState } from "../src/features/proxy-tool.js";
+import { createProxyState, type ProxyState } from "../src/features/tool-catalog.js";
 import { formatStatusCommand, formatToolsCommand } from "../src/features/mcp-command.js";
 
 const fixtureDefinition: ServerEntry = { command: "node", args: ["fixture.mjs"] };
@@ -321,7 +321,7 @@ describe("createStarterProjectConfig", () => {
 });
 
 import { createAdapterRuntime } from "../src/runtime.js";
-import { executeMcpProxy } from "../src/features/proxy-tool.js";
+import { executeSearch } from "../src/features/tool-catalog.js";
 import { startHttpFixture } from "./helpers/http-fixture.js";
 import { startOAuthFixture } from "./helpers/oauth-fixture.js";
 import { loadOAuthStore } from "../src/mcp/oauth-store.js";
@@ -356,7 +356,7 @@ describe("executeReconnectCommand", () => {
     try {
       await executeReconnectCommand(runtime, { cwd }, runtime.loadState({ cwd }), "fixture");
 
-      const searched = executeMcpProxy({ search: "echo" }, runtime.loadState({ cwd }));
+      const searched = executeSearch(runtime.loadState({ cwd }), { query: "echo" });
 
       expect(searched).toContain("fixture_echo");
     } finally {

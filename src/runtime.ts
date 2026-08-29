@@ -1,16 +1,15 @@
 import { homedir } from "node:os";
 import { emptyMetadataCache, getMetadataCachePath, loadMetadataCache, saveMetadataCache, updateServerCache, type CachedResource, type CachedTool, type MetadataCache } from "./core/cache.js";
-import { parseProxyArgs } from "./core/args.js";
 import { renderCallToolResult, renderReadResourceResult } from "./core/result-renderer.js";
 import { loadMcpConfig, type McpConfig, type ServerEntry } from "./core/config.js";
-import { createProxyState, type McpProxyArgs, type ProxyState } from "./features/proxy-tool.js";
+import { createProxyState, type ProxyState } from "./features/tool-catalog.js";
 import { InvalidServerConfigError, McpServerManager, UnsupportedTransportError } from "./mcp/manager.js";
 import { discoverServerMetadata } from "./mcp/metadata.js";
 import { inferServerHint, resolveToolTarget, type ToolTarget } from "./mcp/calls.js";
 
 export interface RuntimeToolContext {
   cwd: string;
-  args?: McpProxyArgs;
+  serverName?: string;
   signal?: AbortSignal;
 }
 
@@ -41,7 +40,7 @@ export interface AdapterRuntime {
   manager: McpServerManager;
   loadState(ctx: RuntimeToolContext): ProxyState;
   connectAndRefresh(ctx: RuntimeToolContext, serverName: string): Promise<ConnectRefreshResult>;
-  callTool(ctx: RuntimeToolContext, state: ProxyState, toolName: string, rawArgs: string | undefined): Promise<CallToolResult>;
+  callTool(ctx: RuntimeToolContext, state: ProxyState, toolName: string, args: Record<string, unknown>): Promise<CallToolResult>;
   closeAll(): Promise<void>;
 }
 
@@ -65,7 +64,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
   async function connectAndRefreshServer(ctx: RuntimeToolContext, serverName: string): Promise<ConnectRefreshResult> {
     const { config, cache, warnings } = loadConfigAndCache(ctx);
     const definition = config.mcpServers[serverName];
-    if (!definition) throw new ServerNotConfiguredError(`Server "${serverName}" is not configured. Use mcp({}) to list configured servers.`);
+    if (!definition) throw new ServerNotConfiguredError(`Server "${serverName}" is not configured. Use /lmcp status to list configured servers.`);
 
     const connection = await manager.connect(serverName, definition, { cwd: ctx.cwd, home, env, signal: ctx.signal, timeoutMs });
     const metadata = await discoverServerMetadata(connection.client, { signal: ctx.signal, timeout: timeoutMs });
@@ -93,7 +92,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
   }
 
   async function resolveTargetWithLazyRefresh(ctx: RuntimeToolContext, state: ProxyState, toolName: string): Promise<{ ok: true; target: ToolTarget; state: ProxyState } | { ok: false; message: string }> {
-    const explicitServerName = ctx.args?.server;
+    const explicitServerName = ctx.serverName;
     let resolved = resolveToolTarget(state, { toolName, serverName: explicitServerName });
     if (resolved.ok) return { ok: true, target: resolved.target, state };
     if (resolved.kind === "unknown_server" || resolved.kind === "ambiguous_tool" || resolved.kind === "invalid_tool") return { ok: false, message: resolved.message };
@@ -124,17 +123,15 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
     async connectAndRefresh(ctx, serverName) {
       return connectAndRefreshServer(ctx, serverName);
     },
-    async callTool(ctx, state, toolName, rawArgs) {
+    async callTool(ctx, state, toolName, args) {
       if (ctx.signal?.aborted) return { ok: false, message: "MCP request cancelled." };
-      const parsedArgs = parseProxyArgs(rawArgs, toolName);
-      if (!parsedArgs.ok) return { ok: false, message: parsedArgs.message };
 
       const resolved = await resolveTargetWithLazyRefresh(ctx, state, toolName);
       if (!resolved.ok) return { ok: false, message: resolved.message };
 
       const target = resolved.target;
       const definition = resolved.state.config.mcpServers[target.serverName];
-      if (!definition) return { ok: false, message: `Server "${target.serverName}" is not configured. Use mcp({}) to list configured servers.` };
+      if (!definition) return { ok: false, message: `Server "${target.serverName}" is not configured. Use /lmcp status to list configured servers.` };
 
       try {
         const connection = await manager.connect(target.serverName, definition, { cwd: ctx.cwd, home, env, signal: ctx.signal, timeoutMs });
@@ -144,7 +141,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
         }
 
         const result = await connection.client.callTool(
-          { name: target.originalName, arguments: parsedArgs.value },
+          { name: target.originalName, arguments: args },
           undefined,
           { signal: ctx.signal, timeout: timeoutMs },
         );

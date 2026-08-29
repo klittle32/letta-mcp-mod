@@ -1,7 +1,7 @@
 import { formatToolName, normalizeToolName, type ToolMetadata } from "../core/tool-names.js";
 import type { AdapterRuntime, RuntimeToolContext } from "../runtime.js";
 import type { LettaModApi, LettaToolDefinition } from "../mod.js";
-import { formatRuntimeCallToolResult, type ProxyServerState, type ProxyState } from "./proxy-tool.js";
+import { formatRuntimeCallToolResult, type ProxyServerState, type ProxyState } from "./tool-catalog.js";
 
 const LETTA_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -22,7 +22,7 @@ export interface DirectToolDescriptorCollection {
 export function collectDirectToolDescriptors(state: ProxyState): DirectToolDescriptorCollection {
   const descriptors: DirectToolDescriptor[] = [];
   const warnings: string[] = [];
-  const usedNames = new Set<string>(["mcp"]);
+  const usedNames = new Set<string>(["search_tools", "call_tool"]);
 
   for (const server of state.servers.values()) {
     const selection = getDirectToolSelection(state, server);
@@ -68,11 +68,10 @@ export function createDirectMcpTool(descriptor: DirectToolDescriptor, runtime: A
       const state = runtime.loadState(ctx);
       const invocationCtx: RuntimeToolContext = {
         cwd: ctx.cwd,
-        args: { server: descriptor.serverName },
+        serverName: descriptor.serverName,
         signal: ctx.signal,
       };
-      const rawArgs = JSON.stringify(ctx.args ?? {});
-      const result = await runtime.callTool(invocationCtx, state, descriptor.name, rawArgs);
+      const result = await runtime.callTool(invocationCtx, state, descriptor.name, ctx.args ?? {});
       return formatRuntimeCallToolResult(result);
     },
   };
@@ -142,14 +141,11 @@ function isSelectedDirectTool(selection: DirectToolSelection, state: ProxyState,
 }
 
 function validateDirectToolName(name: string, usedNames: Set<string>): { ok: true } | { ok: false; warning: string } {
-  if (name === "mcp") {
-    return { ok: false, warning: `Direct tool "${name}" skipped because it conflicts with the compact MCP proxy tool.` };
-  }
   if (!LETTA_TOOL_NAME_PATTERN.test(name)) {
     return { ok: false, warning: `Direct tool "${name}" skipped because Letta tool names must be 1-64 characters using letters, numbers, underscores, or hyphens.` };
   }
   if (usedNames.has(name)) {
-    return { ok: false, warning: `Direct tool "${name}" skipped because another direct tool already uses that name.` };
+    return { ok: false, warning: `Direct tool "${name}" skipped because a model-facing or direct tool already uses that name.` };
   }
   return { ok: true };
 }

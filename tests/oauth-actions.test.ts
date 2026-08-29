@@ -67,7 +67,7 @@ describe("OAuth actions", () => {
 
       expect(output).toContain("OAuth authorization started for \"linear\"");
       expect(output).toContain(`${fixture.origin}/authorize?`);
-      expect(output).toContain('mcp({ action: "auth-complete", server: "linear"');
+      expect(output).toContain("/lmcp auth-complete linear <full redirected URL>");
       expect(output).not.toContain("client-secret-test-value");
       const store = loadOAuthStore({ home, serverName: "linear", serverUrl: fixture.url });
       expect(store?.state).toBeTruthy();
@@ -107,7 +107,7 @@ describe("OAuth actions", () => {
       });
 
       expect(output).toContain("OAuth authorization complete for \"linear\"");
-      expect(output).toContain('mcp({ connect: "linear" })');
+      expect(output).toContain("/lmcp reconnect linear");
       expect(output).not.toContain("fixture-access-token");
       expect(output).not.toContain("fixture-refresh-token");
       expect(output).not.toContain("client-secret-test-value");
@@ -166,7 +166,7 @@ describe("OAuth actions", () => {
       const output = await executeOAuthAction({ action: "auth-start", serverName: "machine", runtime, ctx: { cwd }, state });
 
       expect(output).toContain('OAuth client_credentials token stored for "machine"');
-      expect(output).toContain('mcp({ connect: "machine" })');
+      expect(output).toContain("/lmcp reconnect machine");
       expect(output).not.toContain("fixture-client-credentials-token");
       expect(output).not.toContain("client-secret-test-value");
       const store = loadOAuthStore({ home, serverName: "machine", serverUrl: fixture.url });

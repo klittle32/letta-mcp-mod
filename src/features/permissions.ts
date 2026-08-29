@@ -3,7 +3,7 @@ import type { ApprovalDecision, McpApprovalSettings } from "../core/config.js";
 import { findToolByName, normalizeToolName, type ToolMetadata } from "../core/tool-names.js";
 import type { AdapterRuntime } from "../runtime.js";
 import { collectDirectToolDescriptors, type DirectToolDescriptor } from "./direct-tools.js";
-import type { ProxyState } from "./proxy-tool.js";
+import type { ProxyState } from "./tool-catalog.js";
 
 export type PermissionDecision = ApprovalDecision;
 
@@ -112,7 +112,7 @@ export function registerMcpPermissions(options: {
   const directToolNames = options.directToolNames ? new Set(options.directToolNames) : undefined;
   return letta.permissions.register({
     id: "letta-mcp-adapter-permissions",
-    description: "Apply MCP adapter safety policy to proxy and direct MCP tool calls.",
+    description: "Apply MCP adapter safety policy to catalog and direct MCP tool calls.",
     async check(event) {
       try {
         const state = runtime.loadState({ cwd: event.cwd });
@@ -126,40 +126,15 @@ export function registerMcpPermissions(options: {
 
 function decideMcpPermissionWithoutTracking(event: LettaPermissionEvent, state: ProxyState, context: PermissionDecisionContext): PermissionCheckResult | undefined {
   const { approval } = normalizeApprovalSettings(state.config.settings?.approval);
-  if (event.toolName !== "mcp") return decideDirectToolCall(event, state, approval, context);
-
-  const connectServer = getString(event.args.connect);
-  if (connectServer) {
-    if (!state.servers.has(connectServer)) return unknownServerDecision(connectServer, approval.unknownServers);
-    return { decision: "ask", reason: `Connecting MCP server "${connectServer}" may start external processes or network connections.` };
+  if (event.toolName === "search_tools") {
+    return { decision: "allow", reason: "External tool discovery is allowed." };
   }
-
-  const serverName = getString(event.args.server);
-  if (serverName && !state.servers.has(serverName)) {
-    return unknownServerDecision(serverName, approval.unknownServers);
+  if (event.toolName === "call_tool") {
+    const toolName = getString(event.args.name);
+    if (!toolName) return { decision: "deny", reason: "call_tool requires a tool name returned by search_tools." };
+    return decideCallTool(toolName, event, state, approval);
   }
-
-  const action = getString(event.args.action);
-  if (action) {
-    if (action === "auth-status") return { decision: "allow", reason: "MCP OAuth status is read-only." };
-    if (action === "auth-start" || action === "auth-complete" || action === "auth-clear") {
-      return { decision: "ask", reason: `MCP OAuth action "${action}" may change authentication state.` };
-    }
-    return { decision: "allow", reason: "Unsupported MCP actions are handled without live MCP calls." };
-  }
-
-  const toolName = getString(event.args.tool);
-  if (toolName) return decideProxyToolCall(toolName, event, state, approval);
-
-  if (serverName && !event.args.tool && !event.args.connect && !event.args.action) {
-    return { decision: "allow", reason: "MCP server listing is read-only." };
-  }
-
-  if (!event.args.tool && !event.args.connect && !event.args.action) {
-    return { decision: "allow", reason: "MCP status/search/describe is read-only." };
-  }
-
-  return { decision: "allow", reason: "MCP operation allowed." };
+  return decideDirectToolCall(event, state, approval, context);
 }
 
 function applyApprovalTracking(
@@ -234,21 +209,28 @@ function isDangerousDirectTool(descriptor: DirectToolDescriptor): boolean {
   return isDangerousToolName(descriptor.name) || isDangerousToolName(descriptor.originalName);
 }
 
-function decideProxyToolCall(
+function decideCallTool(
   toolName: string,
   event: LettaPermissionEvent,
   state: ProxyState,
   approval: Required<McpApprovalSettings>,
 ): PermissionCheckResult {
-  const parsedArgs = parseProxyArgs(event.args.args);
-  const resolution = resolveCachedTool(state, toolName, getString(event.args.server));
-  if (!resolution.ok) return { decision: resolution.decision ?? "deny", reason: resolution.reason };
+  const toolArgs = isRecord(event.args.args) ? event.args.args : {};
+  const resolution = resolveCachedTool(state, toolName);
+  if (!resolution.ok) {
+    const serverHint = inferConfiguredServer(state, toolName);
+    if (!serverHint) return { decision: resolution.decision ?? "deny", reason: resolution.reason };
+    if (isDangerousToolName(toolName) || hasPathOutsideWorkingDirectory(toolArgs, event.cwd || event.workingDirectory)) {
+      return { decision: approval.dangerousTools, reason: `Uncached MCP tool "${toolName}" is potentially dangerous.` };
+    }
+    return { decision: "ask", reason: `MCP tool "${toolName}" needs a metadata refresh from configured server "${serverHint}" before execution.` };
+  }
 
   if (isDangerousToolName(resolution.tool.name) || isDangerousToolName(resolution.tool.originalName)) {
     return { decision: approval.dangerousTools, reason: `MCP tool "${toolName}" is potentially dangerous.` };
   }
 
-  if (hasPathOutsideWorkingDirectory(parsedArgs, event.cwd || event.workingDirectory)) {
+  if (hasPathOutsideWorkingDirectory(toolArgs, event.cwd || event.workingDirectory)) {
     return { decision: approval.dangerousTools, reason: `MCP tool "${toolName}" uses a path outside the working directory.` };
   }
 
@@ -259,15 +241,7 @@ type ToolResolution =
   | { ok: true; serverName: string; tool: ToolMetadata }
   | { ok: false; reason: string; decision?: PermissionDecision };
 
-function resolveCachedTool(state: ProxyState, toolName: string, serverHint: string | undefined): ToolResolution {
-  if (serverHint) {
-    const server = state.servers.get(serverHint);
-    if (!server) return { ok: false, decision: normalizeApprovalSettings(state.config.settings?.approval).approval.unknownServers, reason: `MCP server "${serverHint}" is not configured.` };
-    const tool = findToolByName(server.tools, toolName) ?? server.tools.find((candidate) => normalizeToolName(candidate.originalName) === normalizeToolName(toolName));
-    if (!tool) return { ok: false, reason: `MCP tool "${toolName}" was not found in cached metadata.` };
-    return { ok: true, serverName: server.name, tool };
-  }
-
+function resolveCachedTool(state: ProxyState, toolName: string): ToolResolution {
   const matches: Array<{ serverName: string; tool: ToolMetadata }> = [];
   for (const server of state.servers.values()) {
     const tool = findToolByName(server.tools, toolName) ?? server.tools.find((candidate) => normalizeToolName(candidate.originalName) === normalizeToolName(toolName));
@@ -278,18 +252,17 @@ function resolveCachedTool(state: ProxyState, toolName: string, serverHint: stri
   return { ok: false, reason: `MCP tool "${toolName}" was not found in cached metadata.` };
 }
 
-export function isDangerousToolName(name: string): boolean {
-  return DANGEROUS_TOOL_PATTERN.test(name);
+function inferConfiguredServer(state: ProxyState, toolName: string): string | undefined {
+  if (state.servers.size === 1) return [...state.servers.keys()][0];
+  const normalizedName = normalizeToolName(toolName);
+  const matches = [...state.servers.keys()].filter((serverName) => {
+    return normalizedName.startsWith(`${normalizeToolName(serverName)}_`);
+  });
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
-function parseProxyArgs(value: unknown): unknown {
-  if (value === undefined || value === null || value === "") return {};
-  if (typeof value !== "string") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
+export function isDangerousToolName(name: string): boolean {
+  return DANGEROUS_TOOL_PATTERN.test(name);
 }
 
 export function hasPathOutsideWorkingDirectory(value: unknown, cwd: string): boolean {
@@ -325,10 +298,6 @@ function isPathInside(base: string, candidate: string): boolean {
 
 function isUrlLike(value: string): boolean {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
-}
-
-function unknownServerDecision(serverName: string, decision: PermissionDecision): PermissionCheckResult {
-  return { decision, reason: `MCP server "${serverName}" is not configured.` };
 }
 
 function isApprovalDecision(value: unknown): value is PermissionDecision {

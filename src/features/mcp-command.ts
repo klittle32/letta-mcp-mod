@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { loadMcpConfig } from "../core/config.js";
 import { createAdapterRuntime, type AdapterRuntime, type RuntimeToolContext } from "../runtime.js";
 import { executeOAuthAction, type OAuthAction } from "./oauth-actions.js";
-import { executeStatus, type ProxyState } from "./proxy-tool.js";
+import { executeStatus, type ProxyState } from "./tool-catalog.js";
 
 export type ParsedMcpCommand =
   | { kind: "status" }
@@ -330,7 +330,7 @@ export async function executeMcpCommand(rawArgs: string | undefined, runtime: Ad
     case "reconnect":
       return executeReconnectCommand(runtime, ctx, runtime.loadState({ cwd: ctx.cwd, signal: ctx.signal }), parsed.serverName);
     case "oauth": {
-      const runtimeCtx: RuntimeToolContext = { cwd: ctx.cwd, signal: ctx.signal, args: { action: parsed.action, server: parsed.serverName, args: parsed.rawArgs } };
+      const runtimeCtx: RuntimeToolContext = { cwd: ctx.cwd, signal: ctx.signal };
       return executeOAuthAction({ action: parsed.action, serverName: parsed.serverName, rawArgs: parsed.rawArgs, runtime, ctx: runtimeCtx, state: runtime.loadState(runtimeCtx) });
     }
     case "setup":

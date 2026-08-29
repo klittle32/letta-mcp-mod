@@ -34,7 +34,7 @@ describe("adapter runtime callTool", () => {
     await runtime.connectAndRefresh({ cwd }, "fixture");
     const state = runtime.loadState({ cwd });
 
-    const result = await runtime.callTool({ cwd }, state, "fixture_echo", '{"message":"hello"}');
+    const result = await runtime.callTool({ cwd }, state, "fixture_echo", { message: "hello" });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -52,7 +52,7 @@ describe("adapter runtime callTool", () => {
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
     const state = runtime.loadState({ cwd });
 
-    const result = await runtime.callTool({ cwd }, state, "fixture_echo", '{"message":"hello"}');
+    const result = await runtime.callTool({ cwd }, state, "fixture_echo", { message: "hello" });
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.output).toBe("hello");
@@ -66,23 +66,27 @@ describe("adapter runtime callTool", () => {
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
     const state = runtime.loadState({ cwd });
 
-    const result = await runtime.callTool({ cwd, args: { server: "fixture" } }, state, "echo", '{"message":"hi"}');
+    const result = await runtime.callTool({ cwd, serverName: "fixture" }, state, "echo", { message: "hi" });
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.output).toBe("hi");
     await runtime.closeAll();
   });
 
-  it("failed args parse returns parser error and does not connect", async () => {
+  it("accepts already parsed object arguments", async () => {
     const { home, cwd } = tempWorkspace();
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
 
-    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_echo", "not json");
+    const result = await runtime.callTool(
+      { cwd },
+      runtime.loadState({ cwd }),
+      "fixture_echo",
+      { message: "already parsed" },
+    );
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.message).toContain('Invalid args JSON for "fixture_echo"');
-    expect(runtime.manager.getConnection("fixture")).toBeUndefined();
+    expect(result).toMatchObject({ ok: true, output: "already parsed" });
+    await runtime.closeAll();
   });
 
   it("unknown unhinted tool returns guidance and does not leak a connection", async () => {
@@ -90,7 +94,7 @@ describe("adapter runtime callTool", () => {
     writeWorkspaceConfig(cwd, ["fixture", "remote"]);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
 
-    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "missing", "{}");
+    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "missing", {});
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toContain('Tool "missing" was not found');
@@ -103,7 +107,7 @@ describe("adapter runtime callTool", () => {
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
 
-    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_fail_soft", "{}");
+    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_fail_soft", {});
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -118,7 +122,7 @@ describe("adapter runtime callTool", () => {
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
 
-    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_throw_error", "{}");
+    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_throw_error", {});
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toContain('Failed to call MCP tool "fixture_throw_error" on "fixture"');
@@ -130,7 +134,7 @@ describe("adapter runtime callTool", () => {
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
 
-    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_get_fixture_readme", "{}");
+    const result = await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_get_fixture_readme", {});
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -147,7 +151,7 @@ describe("adapter runtime callTool", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const result = await runtime.callTool({ cwd, signal: controller.signal }, runtime.loadState({ cwd }), "fixture_echo", '{"message":"hello"}');
+    const result = await runtime.callTool({ cwd, signal: controller.signal }, runtime.loadState({ cwd }), "fixture_echo", { message: "hello" });
 
     expect(result).toEqual({ ok: false, message: "MCP request cancelled." });
     expect(runtime.manager.getConnection("fixture")).toBeUndefined();
@@ -158,7 +162,7 @@ describe("adapter runtime callTool", () => {
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
 
-    await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_echo", '{"message":"hello"}');
+    await runtime.callTool({ cwd }, runtime.loadState({ cwd }), "fixture_echo", { message: "hello" });
     expect(runtime.manager.getConnection("fixture")?.status).toBe("connected");
 
     await runtime.closeAll();

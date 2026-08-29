@@ -1,12 +1,14 @@
 # Letta MCP Adapter Mod
 
-A Letta Code mod that exposes MCP servers through one compact `mcp` proxy tool, with optional cache-backed direct tools. The adapter is designed to avoid dumping every MCP tool schema into the model context while still letting agents connect to servers, refresh metadata, search tools, describe schemas, and call MCP tools on demand.
+A Letta Code port of the `pi-mcp-adapter` pattern: a lazy, context-efficient MCP gateway. It exposes two compact model tools, `search_tools` and `call_tool`, instead of dumping every configured MCP tool schema into the model context. Optional cache-backed direct tools remain available for selected integrations.
 
 ## What this mod provides
 
-- A compact model-callable `mcp` tool for status, search, describe, connect, OAuth, and tool calls.
+- `search_tools` for finding current MCP capabilities and their argument schemas.
+- `call_tool` for invoking a result using object-valued arguments.
 - A human `/lmcp` slash command for setup, status, cached tool listing, reconnects, and OAuth actions.
 - Lazy MCP connections: activation reads local config/cache but does not start MCP server processes or perform HTTP MCP network work.
+- Transparent metadata refresh when search needs current information.
 - Metadata caching under `~/.letta/mcp-adapter/cache.json`.
 - Stdio, streamable HTTP, and SSE MCP transports.
 - HTTP bearer auth and OAuth authorization-code / client-credentials flows.
@@ -249,7 +251,7 @@ Then refresh metadata:
 
 ### Optional direct tools
 
-By default, only the compact `mcp` proxy tool is registered. Direct MCP tools are opt-in and are registered from the local metadata cache during mod activation.
+By default, only `search_tools` and `call_tool` are registered. Direct MCP tools are opt-in and are registered from the local metadata cache during mod activation.
 
 Enable all cached tools globally:
 
@@ -305,7 +307,7 @@ Direct-tool workflow:
 2. Run `/lmcp reconnect <server>` to cache metadata.
 3. Run `/reload` so Letta Code reactivates the mod and registers direct tools from the cache.
 
-`toolPrefix` controls direct/proxy exposed names:
+`toolPrefix` controls names returned by `search_tools` and used for direct tools:
 
 - `"server"` (default): `github_search_repositories`
 - `"short"`: strips a trailing `-mcp` from the server name before prefixing
@@ -330,71 +332,51 @@ Direct-tool workflow:
 
 The command may open a short transient panel when Letta Code exposes panel UI support. Full details remain in command output.
 
-## Model-facing `mcp` proxy quick reference
+## Model-facing tool quick reference
 
-The agent-facing proxy accepts a small object:
+The model surface follows a discover-then-call workflow:
 
 ```ts
-mcp({
-  search?: string,
-  regex?: boolean,
-  includeSchemas?: boolean,
-  describe?: string,
-  server?: string,
-  connect?: string,
-  tool?: string,
-  args?: string,
-  action?: "auth-start" | "auth-complete" | "auth-status" | "auth-clear"
+search_tools({
+  query: string,
+  limit?: number // 1-50; defaults to 10
+})
+
+call_tool({
+  name: string,
+  args: Record<string, unknown>
 })
 ```
 
-Examples:
+For example:
 
 ```ts
-// Status from local config/cache only
-mcp({})
+const matches = search_tools({ query: "read a file" })
 
-// Refresh metadata for one server
-mcp({ connect: "filesystem" })
-
-// Search cached metadata
-mcp({ search: "read file", includeSchemas: false })
-
-// Bounded regex search against cached names/descriptions
-mcp({ search: "/read|list/i", regex: true, includeSchemas: false })
-
-// Describe a cached tool schema
-mcp({ describe: "filesystem_read_file" })
-
-// Call an MCP tool. args must be a JSON string.
-mcp({ tool: "filesystem_read_file", args: "{\"path\":\"README.md\"}" })
-
-// OAuth actions
-mcp({ action: "auth-status", server: "linear" })
-mcp({ action: "auth-clear", server: "linear" })
+call_tool({
+  name: "filesystem_read_file",
+  args: { path: "README.md" }
+})
 ```
 
-Mode precedence is:
+`search_tools` refreshes missing or stale metadata as needed and returns bounded, ranked results with callable names, descriptions, and full argument schemas. If one integration is unavailable, usable results from other integrations are still returned with a concise failure note.
 
-```text
-action > tool > connect > describe > search > server > status
-```
+`call_tool` accepts the callable name returned by search and a normal object matching that result's schema. It connects lazily and supports stdio, HTTP, and synthetic resource tools through the same interface.
+
+Setup, status, explicit reconnects, and OAuth are intentionally human-facing `/lmcp` operations rather than model tool modes.
 
 ## Permission behavior
 
-The mod registers a permission overlay when Letta Code exposes the permissions API. The compact `mcp` tool and direct tools also declare `requiresApproval: true`; the overlay supplies more precise allow/ask/deny decisions.
+The mod registers a permission overlay when Letta Code exposes the permissions API. `call_tool` and direct tools declare `requiresApproval: true`; the overlay supplies more precise allow/ask/deny decisions. `search_tools` is read-only from the model's perspective and does not require approval.
 
 Default behavior:
 
-- Read-only status, search, describe, cached server listing, and `/lmcp tools` are allowed.
-- Connecting or reconnecting a configured server asks, because it may start a process or make network requests.
-- Unknown live targets are denied by default.
-- `auth-status` is allowed because it only reports local state.
-- `auth-start`, `auth-complete`, and `auth-clear` ask because they change authentication state or stored credentials.
-- Cached tool calls are allowed unless they look risky.
+- Tool search is allowed.
+- Known tool calls are allowed unless they look risky.
+- An uncached call attributable to a configured server asks before lazy connection; an ambiguous unknown target is denied.
 - Tool names containing words like `delete`, `write`, `update`, `exec`, `run`, `shell`, or `browser` ask by default.
 - Tool arguments with path-like keys (`path`, `file`, `dir`, `cwd`, `target`, `destination`, etc.) ask if they resolve outside the current working directory.
-- Direct tools use the same risk checks as proxy tool calls.
+- Direct tools use the same risk checks as `call_tool`.
 - If a risky call was approved in the approval phase but reaches execution with changed args, it is denied.
 
 Tune permission defaults with `settings.approval`:
@@ -417,19 +399,19 @@ Valid decisions are `allow`, `ask`, `alwaysAsk`, and `deny`.
 Notes:
 
 - `dangerousTools` controls dangerous-looking tool names and path arguments outside the working directory.
-- `unknownServers` controls attempts to connect/list/call unknown servers.
+- `unknownServers` controls model calls that cannot be attributed safely to configured metadata.
 - `configWrites` is reserved for future model-callable config-write operations; the current `/lmcp setup create` command is human-invoked.
 
 ## UI and resources
 
 When Letta Code exposes status values, the mod registers a compact `mcp` status value that summarizes configured servers, cached tools, stale/missing cache, and warnings. Set `settings.ui.status` to `false` to disable this status value.
 
-MCP UI resource hints such as `_meta["openai/outputTemplate"]` / `_meta.uiResourceUri` are preserved in cached metadata and surfaced in list/search/describe output. Text resources returned from MCP calls are rendered in output; binary/blob resources are summarized rather than dumped.
+MCP UI resource hints such as `_meta["openai/outputTemplate"]` / `_meta.uiResourceUri` are preserved in cached metadata and surfaced by `search_tools` and `/lmcp tools`. Text resources returned from MCP calls are rendered in output; binary/blob resources are summarized rather than dumped.
 
 ## Safety and limitations
 
 - Activation does not eagerly connect to MCP servers.
-- Search/list/describe operate from local cache only.
-- Regex search is bounded by pattern length and defaults to a 200-character maximum. Override with `settings.regexSearch.maxPatternLength` if needed.
+- `search_tools` may start configured stdio processes or make configured network requests when metadata is missing or stale; these connections are opened only on demand.
+- Search results are bounded to 50 and default to 10.
 - Sampling and elicitation settings are reserved but not advertised to MCP servers yet. The current Letta mod API does not provide a safe scoped conversation/form-input mechanism inside manager-owned MCP request handlers.
 - Secrets should be provided via environment variables. Do not commit `.env`, bearer tokens, OAuth client secrets, or generated auth stores.

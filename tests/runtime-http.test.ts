@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getMetadataCachePath, loadMetadataCache } from "../src/core/cache.js";
-import { executeMcpProxy } from "../src/features/proxy-tool.js";
+import { executeSearch } from "../src/features/tool-catalog.js";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { startHttpFixture } from "./helpers/http-fixture.js";
 
@@ -26,7 +26,7 @@ describe("adapter runtime HTTP integration", () => {
     writeConfig(cwd, { remote: { url: fixture.url } });
     const runtime = createAdapterRuntime({ home, now: () => 1234, timeoutMs: 2_000 });
     try {
-      const result = await runtime.connectAndRefresh({ cwd, args: { connect: "remote" }, signal: new AbortController().signal }, "remote");
+      const result = await runtime.connectAndRefresh({ cwd, signal: new AbortController().signal }, "remote");
 
       expect(result.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen", "fail_soft"]);
       expect(result.resources.map((resource) => resource.uri)).toEqual(["fixture://http-readme"]);
@@ -39,18 +39,18 @@ describe("adapter runtime HTTP integration", () => {
     }
   });
 
-  it("mcp connect/search uses refreshed HTTP cache", async () => {
+  it("catalog search uses refreshed HTTP cache", async () => {
     const fixture = await startHttpFixture(join(process.cwd(), "tests/fixtures/http-streamable-fixture.mjs"));
     const { home, cwd } = tempWorkspace();
     writeConfig(cwd, { remote: { url: fixture.url } });
     const runtime = createAdapterRuntime({ home, now: () => 1_000, timeoutMs: 2_000 });
     try {
-      const ctx = { cwd, args: {}, signal: new AbortController().signal };
-      const connected = await executeMcpProxy({ connect: "remote" }, runtime.loadState(ctx), runtime, { ...ctx, args: { connect: "remote" } });
-      const searched = executeMcpProxy({ search: "echo" }, runtime.loadState(ctx));
+      const ctx = { cwd, signal: new AbortController().signal };
+      const connected = await runtime.connectAndRefresh(ctx, "remote");
+      const searched = executeSearch(runtime.loadState(ctx), { query: "echo" });
 
-      expect(connected).toContain('Connected to "remote" and cached 3 tools, 1 resource.');
-      expect(connected).toContain("- remote_echo - Echo a message over HTTP");
+      expect(connected.tools).toHaveLength(3);
+      expect(connected.resources).toHaveLength(1);
       expect(searched).toContain("remote_echo");
     } finally {
       await runtime.closeAll();

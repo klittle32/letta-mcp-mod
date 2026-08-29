@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getMetadataCachePath } from "../src/core/cache.js";
-import { executeMcpProxy } from "../src/features/proxy-tool.js";
+import { executeMcpCommand } from "../src/features/mcp-command.js";
 import { loadOAuthStore, redactOAuthMessage } from "../src/mcp/oauth-store.js";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { startOAuthFixture } from "./helpers/oauth-fixture.js";
@@ -57,8 +57,7 @@ describe("OAuth redaction", () => {
     }, null, 2));
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
     try {
-      const startArgs = { action: "auth-start", server: "remote" };
-      const start = await executeMcpProxy(startArgs, runtime.loadState({ cwd, args: startArgs }), runtime, { cwd, args: startArgs });
+      const start = await executeMcpCommand("auth-start remote", runtime, { cwd });
       const storeAfterStart = loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url });
       const codeVerifier = storeAfterStart?.codeVerifier;
       expect(codeVerifier).toBeTruthy();
@@ -67,12 +66,11 @@ describe("OAuth redaction", () => {
 
       const redirectUrl = await fixture.authorize(storeAfterStart!.authorizationUrl!);
       const code = new URL(redirectUrl).searchParams.get("code");
-      const completeArgs = { action: "auth-complete", server: "remote", args: JSON.stringify({ redirectUrl }) };
-      const complete = await executeMcpProxy(completeArgs, runtime.loadState({ cwd, args: completeArgs }), runtime, { cwd, args: completeArgs });
+      const complete = await executeMcpCommand(`auth-complete remote ${redirectUrl}`, runtime, { cwd });
       expect(complete).not.toContain(code!);
       expectNoSecrets(complete);
 
-      const connect = await executeMcpProxy({ connect: "remote" }, runtime.loadState({ cwd }), runtime, { cwd, args: { connect: "remote" } });
+      const connect = await executeMcpCommand("reconnect remote", runtime, { cwd });
       expectNoSecrets(connect);
 
       const cacheText = readFileSync(getMetadataCachePath(home), "utf8");

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { computeServerHash, loadMetadataCache } from "../src/core/cache.js";
-import { executeMcpProxy } from "../src/features/proxy-tool.js";
+import { executeMcpCommand } from "../src/features/mcp-command.js";
 import { loadOAuthStore } from "../src/mcp/oauth-store.js";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { startOAuthFixture } from "./helpers/oauth-fixture.js";
@@ -36,8 +36,10 @@ describe("adapter runtime OAuth integration", () => {
     writeConfig(cwd, fixture);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
     try {
-      const ctx = { cwd, args: { connect: "remote" }, signal: new AbortController().signal };
-      const output = await executeMcpProxy({ connect: "remote" }, runtime.loadState(ctx), runtime, ctx);
+      const output = await executeMcpCommand("reconnect remote", runtime, {
+        cwd,
+        signal: new AbortController().signal,
+      });
 
       expect(output).toContain('Failed to connect to "remote"');
       expect(output).toMatch(/Unauthorized|auth-start|authorization/i);
@@ -55,23 +57,21 @@ describe("adapter runtime OAuth integration", () => {
     writeConfig(cwd, fixture, { scope: "read write" });
     const runtime = createAdapterRuntime({ home, now: () => 1234, timeoutMs: 2_000 });
     try {
-      const startArgs = { action: "auth-start", server: "remote" };
-      const start = await executeMcpProxy(startArgs, runtime.loadState({ cwd, args: startArgs }), runtime, { cwd, args: startArgs });
+      const start = await executeMcpCommand("auth-start remote", runtime, { cwd });
       expect(start).toContain("OAuth authorization started");
       const authorizationUrl = loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })?.authorizationUrl;
       const redirectUrl = await fixture.authorize(authorizationUrl!);
-      const completeArgs = { action: "auth-complete", server: "remote", args: JSON.stringify({ redirectUrl }) };
-      const complete = await executeMcpProxy(completeArgs, runtime.loadState({ cwd, args: completeArgs }), runtime, { cwd, args: completeArgs });
+      const complete = await executeMcpCommand(`auth-complete remote ${redirectUrl}`, runtime, { cwd });
       expect(complete).toContain("OAuth authorization complete");
       expect(loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })?.tokens?.access_token).toBe("fixture-access-token");
 
-      const refreshed = await runtime.connectAndRefresh({ cwd, args: { connect: "remote" } }, "remote");
+      const refreshed = await runtime.connectAndRefresh({ cwd }, "remote");
       expect(refreshed.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen"]);
       expect(loadMetadataCache({ home })?.servers.remote.cachedAt).toBe(1234);
 
       const cachedState = runtime.loadState({ cwd });
       expect(cachedState.servers.get("remote")?.tools.map((tool) => tool.name)).toContain("remote_echo");
-      const called = await runtime.callTool({ cwd, args: { tool: "remote_echo" } }, cachedState, "remote_echo", JSON.stringify({ message: "hello oauth" }));
+      const called = await runtime.callTool({ cwd }, cachedState, "remote_echo", { message: "hello oauth" });
       expect(called).toMatchObject({ ok: true, output: "hello oauth" });
     } finally {
       await runtime.closeAll();
@@ -85,11 +85,9 @@ describe("adapter runtime OAuth integration", () => {
     writeConfig(cwd, fixture, { scope: "read" });
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
     try {
-      const startArgs = { action: "auth-start", server: "remote" };
-      await executeMcpProxy(startArgs, runtime.loadState({ cwd, args: startArgs }), runtime, { cwd, args: startArgs });
+      await executeMcpCommand("auth-start remote", runtime, { cwd });
       const redirectUrl = await fixture.authorize(loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })!.authorizationUrl!);
-      const completeArgs = { action: "auth-complete", server: "remote", args: JSON.stringify({ redirectUrl }) };
-      await executeMcpProxy(completeArgs, runtime.loadState({ cwd, args: completeArgs }), runtime, { cwd, args: completeArgs });
+      await executeMcpCommand(`auth-complete remote ${redirectUrl}`, runtime, { cwd });
       await runtime.connectAndRefresh({ cwd }, "remote");
       const cache = loadMetadataCache({ home })!;
       expect(cache.servers.remote.configHash).toBe(computeServerHash({ url: fixture.url, auth: "oauth", oauth: { clientId: "client-id", clientSecret: "client-secret-test-value", redirectUri: fixture.redirectUri, scope: "read" } }));

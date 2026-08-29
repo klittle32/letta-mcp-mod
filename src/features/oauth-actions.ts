@@ -5,7 +5,7 @@ import { InvalidServerConfigError } from "../mcp/errors.js";
 import { resolveHttpUrl } from "../mcp/http.js";
 import { createOAuthProvider, isOAuthEnabled, parseOAuthRedirectUrl } from "../mcp/oauth-provider.js";
 import { clearOAuthCredentials, loadOAuthStore, redactOAuthMessage, saveOAuthStore } from "../mcp/oauth-store.js";
-import type { ProxyState } from "./proxy-tool.js";
+import type { ProxyState } from "./tool-catalog.js";
 
 export type OAuthAction = "auth-start" | "auth-complete" | "auth-status" | "auth-clear";
 
@@ -36,7 +36,7 @@ function executeAuthClear(options: { serverName: string | undefined; state: Prox
   return [
     `OAuth credentials cleared for "${prepared.serverName}".`,
     "",
-    `Run mcp({ action: "auth-start", server: "${prepared.serverName}" }) to start a new login if needed.`,
+    `Run /lmcp auth-start ${prepared.serverName} to start a new login if needed.`,
   ].join("\n");
 }
 
@@ -59,7 +59,7 @@ export async function executeAuthStart(options: {
     });
     const result = await auth(provider, { serverUrl: prepared.serverUrl });
     if (result === "AUTHORIZED") {
-      return [`OAuth authorization is available for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`].join("\n");
+      return [`OAuth authorization is available for "${prepared.serverName}".`, "", `Next: run /lmcp reconnect ${prepared.serverName}.`].join("\n");
     }
     const authorizationUrl = provider.authorizationUrl;
     if (!authorizationUrl) return `OAuth authorization started for "${prepared.serverName}", but no authorization URL was returned. Run auth-start again.`;
@@ -70,9 +70,9 @@ export async function executeAuthStart(options: {
       authorizationUrl,
       "",
       "After login, copy the full redirected URL and run:",
-      `mcp({ action: "auth-complete", server: "${prepared.serverName}", args: "{\\\"redirectUrl\\\":\\\"<full redirected URL>\\\"}" })`,
+      `/lmcp auth-complete ${prepared.serverName} <full redirected URL>`,
       "",
-      `Then reconnect with mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`,
+      `Then reconnect with /lmcp reconnect ${prepared.serverName}.`,
     ].join("\n");
   } catch (error) {
     return redactOAuthMessage(error);
@@ -128,7 +128,7 @@ async function executeClientCredentialsAuthStart(
         tokens,
       },
     });
-    return [`OAuth client_credentials token stored for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`].join("\n");
+    return [`OAuth client_credentials token stored for "${prepared.serverName}".`, "", `Next: run /lmcp reconnect ${prepared.serverName}.`].join("\n");
   } catch (error) {
     return redactOAuthMessage(error);
   }
@@ -176,7 +176,7 @@ export async function executeAuthComplete(options: {
     await auth(provider, { serverUrl: prepared.serverUrl, authorizationCode: parsedRedirect.code });
     const tokens = await provider.tokens();
     if (!tokens?.access_token) return `OAuth authorization did not return an access token for "${prepared.serverName}". Run auth-start again.`;
-    return [`OAuth authorization complete for "${prepared.serverName}".`, "", `Next: run mcp({ connect: "${prepared.serverName}" }) or /lmcp reconnect ${prepared.serverName}.`].join("\n");
+    return [`OAuth authorization complete for "${prepared.serverName}".`, "", `Next: run /lmcp reconnect ${prepared.serverName}.`].join("\n");
   } catch (error) {
     return redactOAuthMessage(error);
   }
@@ -200,9 +200,9 @@ function prepareOAuthServer(
   state: ProxyState,
   serverName: string | undefined,
 ): { ok: true; serverName: string; definition: NonNullable<ReturnType<ProxyState["servers"]["get"]>>["definition"]; serverUrl: URL } | { ok: false; message: string } {
-  if (!serverName) return { ok: false, message: "OAuth server is required. Use mcp({ action: \"auth-start\", server: \"server\" })." };
+  if (!serverName) return { ok: false, message: "OAuth server is required. Use /lmcp auth-start <server>." };
   const server = state.servers.get(serverName);
-  if (!server) return { ok: false, message: `Server "${serverName}" is not configured. Use mcp({}) to list configured servers.` };
+  if (!server) return { ok: false, message: `Server "${serverName}" is not configured. Use /lmcp status to list configured servers.` };
   if (!server.definition.url) return { ok: false, message: `Server "${serverName}" requires an HTTP URL for OAuth authentication.` };
   if (!isOAuthEnabled(server.definition)) return { ok: false, message: `OAuth is not configured for server "${serverName}". Set auth: "oauth" and oauth settings in .mcp.json.` };
   try {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { updateServerCache, type MetadataCache } from "../src/core/cache.js";
 import type { McpConfig, ServerEntry } from "../src/core/config.js";
-import { createProxyState, type ProxyState } from "../src/features/proxy-tool.js";
+import { createProxyState, type ProxyState } from "../src/features/tool-catalog.js";
 import { inferServerHint, resolveToolTarget } from "../src/mcp/calls.js";
 
 const definition: ServerEntry = { command: "node", args: ["fixture.mjs"] };
@@ -75,17 +75,17 @@ describe("tool target resolution", () => {
     expect(resolveToolTarget(stateWithCache(), { toolName: "echo", serverName: "missing" })).toEqual({
       ok: false,
       kind: "unknown_server",
-      message: 'Server "missing" is not configured. Use mcp({}) to list configured servers.',
+      message: 'Server "missing" is not configured. Use /lmcp status to list configured servers.',
     });
   });
 
-  it("reports unknown tool with search/connect hint", () => {
+  it("reports unknown tool with a search_tools hint", () => {
     const result = resolveToolTarget(stateWithCache(), { toolName: "missing" });
 
     expect(result).toEqual({
       ok: false,
       kind: "unknown_tool",
-      message: 'Tool "missing" was not found in cached MCP metadata. Use mcp({ search: "missing" }) or mcp({ connect: "server" }) first.',
+      message: 'Tool "missing" was not found. Use search_tools to find the available callable name.',
       serverHint: undefined,
     });
   });

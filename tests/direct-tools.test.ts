@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { computeServerHash, type CachedResource, type CachedTool, type MetadataCache } from "../src/core/cache.js";
 import type { McpConfig, ServerEntry } from "../src/core/config.js";
-import { createProxyState, type ProxyState } from "../src/features/proxy-tool.js";
+import { createProxyState, type ProxyState } from "../src/features/tool-catalog.js";
 import { collectDirectToolDescriptors, createDirectMcpTool, registerCachedDirectTools, type DirectToolDescriptor } from "../src/features/direct-tools.js";
 import type { AdapterRuntime } from "../src/runtime.js";
 import type { LettaModApi, LettaToolDefinition } from "../src/mod.js";
@@ -185,7 +185,7 @@ describe("direct tool descriptor collection", () => {
     ]);
   });
 
-  it("skips invalid, too-long, proxy-colliding, and duplicate tool names with warnings", () => {
+  it("skips invalid, too-long, model-surface-colliding, and duplicate tool names with warnings", () => {
     const invalid: ServerEntry = { command: "invalid", directTools: true };
     const long: ServerEntry = { command: "long", directTools: true };
     const proxyCollision: ServerEntry = { command: "proxy", directTools: true };
@@ -200,7 +200,7 @@ describe("direct tool descriptor collection", () => {
       cacheFor({
         invalid: { definition: invalid, tools: [{ name: "bad.name" }] },
         long: { definition: long, tools: [{ name: veryLongName }] },
-        proxyCollision: { definition: proxyCollision, tools: [{ name: "mcp" }] },
+        proxyCollision: { definition: proxyCollision, tools: [{ name: "call_tool" }] },
         first: { definition: first, tools: [{ name: "echo" }] },
         second: { definition: second, tools: [{ name: "echo" }] },
       }),
@@ -209,8 +209,8 @@ describe("direct tool descriptor collection", () => {
     expect(result.descriptors.map((descriptor) => descriptor.name)).toEqual(["echo"]);
     expect(result.warnings.join("\n")).toContain('Direct tool "bad.name" skipped');
     expect(result.warnings.join("\n")).toContain(veryLongName);
-    expect(result.warnings.join("\n")).toContain('Direct tool "mcp" skipped because it conflicts with the compact MCP proxy tool');
-    expect(result.warnings.join("\n")).toContain('Direct tool "echo" skipped because another direct tool already uses that name');
+    expect(result.warnings.join("\n")).toContain('Direct tool "call_tool" skipped because a model-facing or direct tool already uses that name');
+    expect(result.warnings.join("\n")).toContain('Direct tool "echo" skipped because a model-facing or direct tool already uses that name');
   });
 });
 
@@ -289,7 +289,7 @@ describe("direct MCP tool definitions", () => {
     expect(runtime.callTool).not.toHaveBeenCalled();
   });
 
-  it("loads invocation state from ctx.cwd and calls runtime with JSON-string args plus server hint", async () => {
+  it("loads invocation state from ctx.cwd and calls runtime with object args plus server hint", async () => {
     const runtime = fakeRuntime();
     const tool = createDirectMcpTool(descriptor(), runtime);
     const signal = new AbortController().signal;
@@ -298,10 +298,10 @@ describe("direct MCP tool definitions", () => {
 
     expect(runtime.loadState).toHaveBeenCalledWith({ cwd: "/tmp/workspace", args: { message: "hello" }, signal });
     expect(runtime.callTool).toHaveBeenCalledWith(
-      { cwd: "/tmp/workspace", args: { server: "fixture" }, signal },
+      { cwd: "/tmp/workspace", serverName: "fixture", signal },
       expect.anything(),
       "fixture_echo",
-      JSON.stringify({ message: "hello" }),
+      { message: "hello" },
     );
     expect(output).toBe('Called "fixture_echo" on "fixture".\n\nhello');
   });

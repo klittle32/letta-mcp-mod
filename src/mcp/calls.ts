@@ -1,5 +1,5 @@
 import { getServerPrefix, normalizeToolName, type ToolMetadata } from "../core/tool-names.js";
-import type { ProxyState, ProxyServerState } from "../features/proxy-tool.js";
+import type { ProxyState, ProxyServerState } from "../features/tool-catalog.js";
 
 export interface ToolTarget {
   serverName: string;
@@ -25,7 +25,7 @@ export function resolveToolTarget(state: ProxyState, options: { toolName: string
     return {
       ok: false,
       kind: "unknown_server",
-      message: `Server "${options.serverName}" is not configured. Use mcp({}) to list configured servers.`,
+      message: `Server "${options.serverName}" is not configured. Use /lmcp status to list configured servers.`,
     };
   }
 
@@ -47,7 +47,7 @@ export function resolveToolTarget(state: ProxyState, options: { toolName: string
   return {
     ok: false,
     kind: "unknown_tool",
-    message: `Tool "${requestedName}" was not found in cached MCP metadata. Use mcp({ search: "${requestedName}" }) or mcp({ connect: "server" }) first.`,
+    message: `Tool "${requestedName}" was not found. Use search_tools to find the available callable name.`,
     serverHint,
   };
 }

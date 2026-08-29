@@ -30,7 +30,7 @@ describe("adapter runtime", () => {
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home });
 
-    const state = runtime.loadState({ cwd, args: {}, signal: new AbortController().signal });
+    const state = runtime.loadState({ cwd, signal: new AbortController().signal });
 
     expect(state.servers.get("fixture")?.cacheEntry).toBeUndefined();
     expect(runtime.manager.getConnection("fixture")).toBeUndefined();
@@ -43,7 +43,7 @@ describe("adapter runtime", () => {
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home, now: () => 1234, timeoutMs: 2_000 });
 
-    const result = await runtime.connectAndRefresh({ cwd, args: { connect: "fixture" }, signal: new AbortController().signal }, "fixture");
+    const result = await runtime.connectAndRefresh({ cwd, signal: new AbortController().signal }, "fixture");
 
     expect(result.serverName).toBe("fixture");
     expect(result.tools.map((tool) => tool.name)).toEqual(["echo", "list_items", "structured_status", "fail_soft", "throw_error"]);

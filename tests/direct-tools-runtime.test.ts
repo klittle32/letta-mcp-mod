@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import activate, { type LettaModApi, type LettaToolDefinition } from "../src/mod.js";
-import { executeMcpProxy } from "../src/features/proxy-tool.js";
+import { executeMcpCommand } from "../src/features/mcp-command.js";
 import { loadOAuthStore } from "../src/mcp/oauth-store.js";
 import { createAdapterRuntime } from "../src/runtime.js";
 import { startHttpFixture } from "./helpers/http-fixture.js";
@@ -59,7 +59,8 @@ describe("direct MCP tools runtime integration", () => {
 
     const dispose = activate(letta, runtime, { activationCwd: cwd });
 
-    expect(registeredTools.map((tool) => tool.name)).toContain("mcp");
+    expect(registeredTools.map((tool) => tool.name)).toContain("search_tools");
+    expect(registeredTools.map((tool) => tool.name)).toContain("call_tool");
     expect(registeredTools.map((tool) => tool.name)).toContain("fixture_echo");
 
     const directTool = registeredTools.find((tool) => tool.name === "fixture_echo");
@@ -70,7 +71,7 @@ describe("direct MCP tools runtime integration", () => {
     await dispose?.();
   });
 
-  it("keeps only the compact proxy available when direct tools are configured without cache", async () => {
+  it("keeps only the split catalog tools available when direct tools are configured without cache", async () => {
     const { home, cwd } = tempWorkspace();
     writeWorkspaceConfig(cwd);
     const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
@@ -78,15 +79,12 @@ describe("direct MCP tools runtime integration", () => {
 
     const dispose = activate(letta, runtime, { activationCwd: cwd });
 
-    expect(registeredTools.map((tool) => tool.name)).toEqual(["mcp"]);
+    expect(registeredTools.map((tool) => tool.name)).toEqual(["search_tools", "call_tool"]);
     expect(letta.diagnostics.report).toHaveBeenCalledWith(expect.objectContaining({
       severity: "warning",
       message: expect.stringContaining('Direct tools for "fixture" are configured but metadata cache is missing'),
     }));
 
-    const status = await registeredTools[0].run({ cwd, args: {} });
-    expect(status).toContain("fixture (configured, no cache)");
-    expect(status).toContain('Use mcp({ connect: "server" })');
     await dispose?.();
   });
 
@@ -125,12 +123,10 @@ describe("direct MCP tools runtime integration", () => {
     });
     const runtime = createAdapterRuntime({ home, now: () => 1_234, timeoutMs: 2_000 });
     try {
-      const startArgs = { action: "auth-start", server: "remote" };
-      await executeMcpProxy(startArgs, runtime.loadState({ cwd, args: startArgs }), runtime, { cwd, args: startArgs });
+      await executeMcpCommand("auth-start remote", runtime, { cwd });
       const authorizationUrl = loadOAuthStore({ home, serverName: "remote", serverUrl: fixture.url })?.authorizationUrl;
       const redirectUrl = await fixture.authorize(authorizationUrl!);
-      const completeArgs = { action: "auth-complete", server: "remote", args: JSON.stringify({ redirectUrl }) };
-      await executeMcpProxy(completeArgs, runtime.loadState({ cwd, args: completeArgs }), runtime, { cwd, args: completeArgs });
+      await executeMcpCommand(`auth-complete remote ${redirectUrl}`, runtime, { cwd });
       await runtime.connectAndRefresh({ cwd }, "remote");
 
       const { letta, registeredTools } = fakeLetta();
