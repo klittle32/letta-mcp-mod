@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { loadMcpConfig, type ServerEntry } from "../src/core/config.js";
 import { InvalidServerConfigError } from "../src/mcp/manager.js";
 import {
-  mergeHeaders,
   resolveBearerToken,
   resolveHttpHeaders,
   resolveHttpMode,
@@ -42,13 +41,14 @@ describe("resolveHttpUrl", () => {
 });
 
 describe("resolveHttpMode", () => {
-  it("defaults to auto", () => {
-    expect(resolveHttpMode({ url: "http://localhost/mcp" })).toBe("auto");
+  it("defaults to streamable HTTP", () => {
+    expect(resolveHttpMode({ url: "http://localhost/mcp" })).toBe("streamable-http");
   });
 
-  it("accepts streamable-http and sse", () => {
+  it("maps auto and deprecated sse to streamable HTTP", () => {
     expect(resolveHttpMode({ url: "http://localhost/mcp", transport: "streamable-http" } as ServerEntry)).toBe("streamable-http");
-    expect(resolveHttpMode({ url: "http://localhost/mcp", transport: "sse" } as ServerEntry)).toBe("sse");
+    expect(resolveHttpMode({ url: "http://localhost/mcp", transport: "auto" } as ServerEntry)).toBe("streamable-http");
+    expect(resolveHttpMode({ url: "http://localhost/mcp", transport: "sse" } as ServerEntry)).toBe("streamable-http");
   });
 
   it("rejects unknown transport modes", () => {
@@ -126,15 +126,5 @@ describe("resolveHttpHeaders", () => {
       "x-one": "1",
       "x-two": "2",
     });
-  });
-});
-
-describe("mergeHeaders", () => {
-  it("merges plain object headers into existing HeadersInit", () => {
-    const headers = mergeHeaders(new Headers({ accept: "text/event-stream" }), { Authorization: "Bearer secret", "x-fixture": "yes" });
-
-    expect(new Headers(headers).get("accept")).toBe("text/event-stream");
-    expect(new Headers(headers).get("authorization")).toBe("Bearer secret");
-    expect(new Headers(headers).get("x-fixture")).toBe("yes");
   });
 });

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { DiscoverResult } from "@modelcontextprotocol/client";
 import type { OAuthConfig, ServerEntry } from "./config.js";
 import { interpolateEnvRecord, interpolateEnvVars, resolveConfigPath } from "./config.js";
 import {
@@ -27,11 +28,16 @@ export interface CachedResource {
   description?: string;
 }
 
+export type CachedProtocolNegotiation =
+  | { era: "legacy"; version: string }
+  | { era: "modern"; version: string; discover: DiscoverResult };
+
 export interface ServerCacheEntry {
   configHash: string;
   tools: CachedTool[];
   resources: CachedResource[];
   cachedAt: number;
+  protocol?: CachedProtocolNegotiation;
 }
 
 export interface MetadataCache {
@@ -84,6 +90,7 @@ export function updateServerCache(options: {
   definition: ServerEntry;
   tools: CachedTool[];
   resources: CachedResource[];
+  protocol?: CachedProtocolNegotiation;
   now?: number;
   home?: string;
   env?: Record<string, string | undefined>;
@@ -97,6 +104,34 @@ export function updateServerCache(options: {
         cachedAt: options.now ?? Date.now(),
         tools: options.tools,
         resources: options.resources,
+        protocol: options.protocol,
+      },
+    },
+  };
+}
+
+export function updateServerProtocolCache(options: {
+  cache: MetadataCache;
+  serverName: string;
+  definition: ServerEntry;
+  protocol: CachedProtocolNegotiation;
+  now?: number;
+  home?: string;
+  env?: Record<string, string | undefined>;
+}): MetadataCache {
+  const configHash = computeServerHash(options.definition, { home: options.home, env: options.env });
+  const current = options.cache.servers[options.serverName];
+  const reusable = current?.configHash === configHash ? current : undefined;
+  return {
+    version: 1,
+    servers: {
+      ...options.cache.servers,
+      [options.serverName]: {
+        configHash,
+        cachedAt: reusable?.cachedAt ?? options.now ?? Date.now(),
+        tools: reusable?.tools ?? [],
+        resources: reusable?.resources ?? [],
+        protocol: options.protocol,
       },
     },
   };
@@ -115,6 +150,7 @@ export function computeServerHash(
     cwd: definition.cwd ? resolveConfigPath(definition.cwd, home, env) : undefined,
     url: definition.url,
     transport: definition.transport,
+    protocolVersion: definition.protocolVersion,
     headers: definition.headers ? interpolateEnvRecord(definition.headers, env) : undefined,
     auth: definition.auth,
     bearerToken: definition.bearerToken ? interpolateEnvVars(definition.bearerToken, env) : undefined,
@@ -202,8 +238,16 @@ function isValidCache(value: unknown): value is MetadataCache {
       && typeof entry.configHash === "string"
       && typeof entry.cachedAt === "number"
       && Array.isArray(entry.tools)
-      && Array.isArray(entry.resources);
+      && Array.isArray(entry.resources)
+      && isValidProtocolNegotiation(entry.protocol);
   });
+}
+
+function isValidProtocolNegotiation(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value) || typeof value.version !== "string") return false;
+  if (value.era === "legacy") return true;
+  return value.era === "modern" && isRecord(value.discover);
 }
 
 function stableStringify(value: unknown): string {

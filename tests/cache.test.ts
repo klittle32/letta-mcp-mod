@@ -11,6 +11,7 @@ import {
   reconstructToolMetadata,
   saveMetadataCache,
   updateServerCache,
+  updateServerProtocolCache,
   type MetadataCache,
 } from "../src/core/cache.js";
 import type { ServerEntry } from "../src/core/config.js";
@@ -110,6 +111,33 @@ describe("metadata cache", () => {
     expect(updated.servers.other).toEqual(original.servers.other);
     expect(updated.servers.filesystem.cachedAt).toBe(2);
     expect(original.servers.filesystem).toBeUndefined();
+  });
+
+  it("updates negotiated protocol without discarding cached metadata", () => {
+    const definition: ServerEntry = { command: "npx", args: ["server"] };
+    const cache = updateServerCache({
+      cache: emptyMetadataCache(),
+      serverName: "filesystem",
+      definition,
+      tools: [{ name: "read_file" }],
+      resources: [{ name: "README", uri: "file:///README.md" }],
+      now: 100,
+    });
+
+    const updated = updateServerProtocolCache({
+      cache,
+      serverName: "filesystem",
+      definition,
+      protocol: { era: "legacy", version: "2025-11-25" },
+      now: 200,
+    });
+
+    expect(updated.servers.filesystem).toMatchObject({
+      cachedAt: 100,
+      tools: [{ name: "read_file" }],
+      resources: [{ name: "README", uri: "file:///README.md" }],
+      protocol: { era: "legacy", version: "2025-11-25" },
+    });
   });
 
   it("server hash is stable independent of object key order", () => {
@@ -215,6 +243,12 @@ describe("HTTP cache identity", () => {
   it("server hash changes when HTTP transport mode changes", () => {
     expect(computeServerHash({ url: "http://localhost/mcp", transport: "streamable-http" })).not.toBe(
       computeServerHash({ url: "http://localhost/mcp", transport: "sse" }),
+    );
+  });
+
+  it("server hash changes when protocol negotiation mode changes", () => {
+    expect(computeServerHash({ url: "http://localhost/mcp", protocolVersion: "legacy" })).not.toBe(
+      computeServerHash({ url: "http://localhost/mcp", protocolVersion: "auto" }),
     );
   });
 

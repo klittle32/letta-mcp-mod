@@ -1,8 +1,7 @@
 import type { ServerEntry } from "../core/config.js";
 import { InvalidServerConfigError } from "./errors.js";
 
-export type HttpTransportKind = "streamable-http" | "sse";
-export type HttpTransportMode = "auto" | HttpTransportKind;
+export type HttpTransportKind = "streamable-http";
 
 export function resolveHttpUrl(serverName: string, definition: ServerEntry): URL {
   const rawUrl = definition.url;
@@ -25,10 +24,10 @@ export function resolveHttpUrl(serverName: string, definition: ServerEntry): URL
   return url;
 }
 
-export function resolveHttpMode(definition: ServerEntry): HttpTransportMode {
+export function resolveHttpMode(definition: ServerEntry): HttpTransportKind {
   const mode = definition.transport ?? "auto";
-  if (mode === "auto" || mode === "streamable-http" || mode === "sse") return mode;
-  throw new InvalidServerConfigError(`HTTP MCP transport must be "auto", "streamable-http", or "sse".`);
+  if (mode === "auto" || mode === "streamable-http" || mode === "sse") return "streamable-http";
+  throw new InvalidServerConfigError(`HTTP MCP transport must be "auto" or "streamable-http".`);
 }
 
 export function resolveBearerToken(
@@ -59,13 +58,5 @@ export function resolveHttpHeaders(
   const headers: Record<string, string> = { ...(definition.headers ?? {}) };
   const token = resolveBearerToken(serverName, definition, env);
   if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
-export function mergeHeaders(base: ConstructorParameters<typeof Headers>[0] | undefined, extra: Record<string, string>): Headers {
-  const headers = new Headers(base);
-  for (const [name, value] of Object.entries(extra)) {
-    headers.set(name, value);
-  }
   return headers;
 }

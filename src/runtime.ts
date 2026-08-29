@@ -1,5 +1,18 @@
 import { homedir } from "node:os";
-import { emptyMetadataCache, getMetadataCachePath, loadMetadataCache, saveMetadataCache, updateServerCache, type CachedResource, type CachedTool, type MetadataCache } from "./core/cache.js";
+import { SdkError, SdkErrorCode, type PriorDiscovery } from "@modelcontextprotocol/client";
+import {
+  emptyMetadataCache,
+  getMetadataCachePath,
+  isServerCacheValid,
+  loadMetadataCache,
+  saveMetadataCache,
+  updateServerCache,
+  updateServerProtocolCache,
+  type CachedResource,
+  type CachedTool,
+  type MetadataCache,
+  type ServerCacheEntry,
+} from "./core/cache.js";
 import { guardMcpOutput } from "./core/output-guard.js";
 import { renderCallToolResult, renderReadResourceResult } from "./core/result-renderer.js";
 import { loadMcpConfig, type McpConfig, type ServerEntry } from "./core/config.js";
@@ -71,14 +84,32 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
     const definition = config.mcpServers[serverName];
     if (!definition) throw new ServerNotConfiguredError(`Server "${serverName}" is not configured. Use /lmcp status to list configured servers.`);
 
-    const connection = await manager.connect(serverName, definition, { cwd: ctx.cwd, home, env, signal: ctx.signal, timeoutMs });
-    const metadata = await discoverServerMetadata(connection.client, { signal: ctx.signal, timeout: timeoutMs });
+    const cacheEntry = cache.servers[serverName];
+    const prior = isServerCacheValid(cacheEntry, definition, { now: now(), home, env })
+      ? toPriorDiscovery(cacheEntry)
+      : undefined;
+    const connection = await manager.connect(serverName, definition, {
+      cwd: ctx.cwd,
+      home,
+      env,
+      signal: ctx.signal,
+      timeoutMs,
+      prior,
+    });
+    let metadata: Awaited<ReturnType<typeof discoverServerMetadata>>;
+    try {
+      metadata = await discoverMetadataWithRetry(connection.client, { signal: ctx.signal, timeout: timeoutMs });
+    } catch (error) {
+      if (isConnectionFailure(error)) await manager.close(serverName).catch(() => undefined);
+      throw error;
+    }
     const updatedCache = updateServerCache({
       cache,
       serverName,
       definition,
       tools: metadata.tools,
       resources: metadata.resources,
+      protocol: connection.protocol,
       now: now(),
       home,
       env,
@@ -147,7 +178,30 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
       });
 
       try {
-        const connection = await manager.connect(target.serverName, definition, { cwd: ctx.cwd, home, env, signal: ctx.signal, timeoutMs });
+        const serverState = resolved.state.servers.get(target.serverName);
+        const connection = await manager.connect(target.serverName, definition, {
+          cwd: ctx.cwd,
+          home,
+          env,
+          signal: ctx.signal,
+          timeoutMs,
+          prior: serverState?.cacheValid ? toPriorDiscovery(serverState.cacheEntry) : undefined,
+        });
+        if (!serverState?.cacheValid || !serverState.cacheEntry?.protocol) {
+          const cache = loadMetadataCache({ home }) ?? emptyMetadataCache();
+          saveMetadataCache({
+            home,
+            cache: updateServerProtocolCache({
+              cache,
+              serverName: target.serverName,
+              definition,
+              protocol: connection.protocol,
+              now: now(),
+              home,
+              env,
+            }),
+          });
+        }
         if (target.isResource && target.resourceUri) {
           const result = await connection.client.readResource({ uri: target.resourceUri }, { signal: ctx.signal, timeout: timeoutMs });
           const rendered = renderReadResourceResult(result);
@@ -157,7 +211,6 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
 
         const result = await connection.client.callTool(
           { name: target.originalName, arguments: args },
-          undefined,
           { signal: ctx.signal, timeout: timeoutMs },
         );
         const rendered = renderCallToolResult(result);
@@ -167,6 +220,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
         const output = [heading, "", rendered.text].join("\n").trimEnd();
         return { ok: true, target, output: await guardOutput(output, result), isError: rendered.isError };
       } catch (error) {
+        if (isConnectionFailure(error)) await manager.close(target.serverName).catch(() => undefined);
         if (error instanceof ServerNotConfiguredError || error instanceof UnsupportedTransportError || error instanceof InvalidServerConfigError) {
           return { ok: false, message: error.message };
         }
@@ -179,4 +233,32 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
       await manager.closeAll();
     },
   };
+}
+
+function toPriorDiscovery(entry: ServerCacheEntry | undefined): PriorDiscovery | undefined {
+  if (entry?.protocol?.era === "legacy") return { kind: "legacy" };
+  if (entry?.protocol?.era === "modern") return { kind: "modern", discover: entry.protocol.discover };
+  return undefined;
+}
+
+async function discoverMetadataWithRetry(
+  client: Parameters<typeof discoverServerMetadata>[0],
+  options: Parameters<typeof discoverServerMetadata>[1],
+): ReturnType<typeof discoverServerMetadata> {
+  try {
+    return await discoverServerMetadata(client, options);
+  } catch (error) {
+    if (!isConnectionFailure(error)) throw error;
+    return discoverServerMetadata(client, options);
+  }
+}
+
+function isConnectionFailure(error: unknown): boolean {
+  if (error instanceof SdkError) {
+    return error.code === SdkErrorCode.ConnectionClosed || error.code === SdkErrorCode.SendFailed;
+  }
+  if (error instanceof TypeError) {
+    return /fetch|network|socket|connection/i.test(error.message);
+  }
+  return false;
 }

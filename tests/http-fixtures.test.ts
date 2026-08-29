@@ -11,13 +11,4 @@ describe("HTTP MCP fixtures", () => {
       await fixture.stop();
     }
   });
-
-  it("starts the SSE HTTP fixture and reports an SSE URL", async () => {
-    const fixture = await startHttpFixture(join(process.cwd(), "tests/fixtures/http-sse-fixture.mjs"));
-    try {
-      expect(fixture.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/sse$/);
-    } finally {
-      await fixture.stop();
-    }
-  });
 });

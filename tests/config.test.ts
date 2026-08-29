@@ -104,6 +104,38 @@ describe("config loading", () => {
     expect(loaded.warnings.some((warning) => warning.includes("mcpServers"))).toBe(true);
   });
 
+  it("normalizes deprecated SSE transport with an actionable warning", () => {
+    const { home, cwd } = tempHome();
+    writeJson(join(cwd, ".mcp.json"), {
+      mcpServers: { remote: { url: "https://example.com/mcp", transport: "sse" } },
+    });
+
+    const loaded = loadMcpConfig({ home, cwd });
+
+    expect(loaded.config.mcpServers.remote.transport).toBe("streamable-http");
+    expect(loaded.warnings).toContain(
+      `Server "remote" in ${join(cwd, ".mcp.json")} uses deprecated transport "sse"; using "streamable-http".`,
+    );
+  });
+
+  it("accepts supported protocol modes and defaults invalid values to legacy", () => {
+    const { home, cwd } = tempHome();
+    writeJson(join(cwd, ".mcp.json"), {
+      mcpServers: {
+        automatic: { url: "https://example.com/auto", protocolVersion: "auto" },
+        modern: { url: "https://example.com/modern", protocolVersion: "2026-07-28" },
+        invalid: { url: "https://example.com/invalid", protocolVersion: "future" },
+      },
+    });
+
+    const loaded = loadMcpConfig({ home, cwd });
+
+    expect(loaded.config.mcpServers.automatic.protocolVersion).toBe("auto");
+    expect(loaded.config.mcpServers.modern.protocolVersion).toBe("2026-07-28");
+    expect(loaded.config.mcpServers.invalid.protocolVersion).toBe("legacy");
+    expect(loaded.warnings.some((warning) => warning.includes(`Server "invalid"`) && warning.includes("protocolVersion"))).toBe(true);
+  });
+
   it("interpolates ${VAR} and $env:VAR", () => {
     expect(interpolateEnvVars("${TOKEN}:$env:USER", { TOKEN: "abc", USER: "kyle" })).toBe("abc:kyle");
   });

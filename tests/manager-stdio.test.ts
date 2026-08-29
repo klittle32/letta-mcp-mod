@@ -15,6 +15,19 @@ const fixtureDefinition: ServerEntry = {
   args: [join(repoRoot, "tests/fixtures/stdio-mcp-fixture.mjs")],
 };
 
+interface FixtureStats {
+  methods: Record<string, number>;
+  requestIds: Array<string | number>;
+  protocolHeaders: Array<string | null>;
+  dropped: boolean;
+  corrected: boolean;
+}
+
+async function fetchFixtureStats(url: string): Promise<FixtureStats> {
+  const response = await fetch(new URL("/stats", url));
+  return response.json() as Promise<FixtureStats>;
+}
+
 async function withManager<T>(fn: (manager: McpServerManager) => Promise<T>): Promise<T> {
   const manager = new McpServerManager();
   try {
@@ -32,8 +45,22 @@ describe("McpServerManager stdio", () => {
 
       expect(connection.status).toBe("connected");
       expect(connection.transportKind).toBe("stdio");
+      expect(connection.protocol.era).toBe("legacy");
       expect(metadata.tools.map((tool) => tool.name)).toEqual(["echo", "list_items", "structured_status", "fail_soft", "throw_error"]);
       expect(metadata.resources.map((resource) => resource.uri)).toEqual(["fixture://readme", "fixture://blob"]);
+    });
+  });
+
+  it("auto negotiation falls back to legacy for a stdio server without modern discovery", async () => {
+    await withManager(async (manager) => {
+      const connection = await manager.connect(
+        "fixture",
+        { ...fixtureDefinition, protocolVersion: "auto" },
+        { cwd: repoRoot, timeoutMs: 2_000 },
+      );
+
+      expect(connection.protocol.era).toBe("legacy");
+      expect(connection.protocol.version).toBe("2025-11-25");
     });
   });
 
@@ -42,9 +69,9 @@ describe("McpServerManager stdio", () => {
     await withManager(async (manager) => {
       const connection = await manager.connect("fixture", fixtureDefinition, { cwd: repoRoot, timeoutMs: 2_000 });
 
-      const echo = await connection.client.callTool({ name: "echo", arguments: { message: "hello" } }, undefined, { timeout: 2_000 });
-      const structured = await connection.client.callTool({ name: "structured_status", arguments: {} }, undefined, { timeout: 2_000 });
-      const softFailure = await connection.client.callTool({ name: "fail_soft", arguments: {} }, undefined, { timeout: 2_000 });
+      const echo = await connection.client.callTool({ name: "echo", arguments: { message: "hello" } }, { timeout: 2_000 });
+      const structured = await connection.client.callTool({ name: "structured_status", arguments: {} }, { timeout: 2_000 });
+      const softFailure = await connection.client.callTool({ name: "fail_soft", arguments: {} }, { timeout: 2_000 });
       const readme = await connection.client.readResource({ uri: "fixture://readme" }, { timeout: 2_000 });
 
       expect(echo.content).toEqual([{ type: "text", text: "hello" }]);
@@ -116,8 +143,104 @@ describe("McpServerManager stdio", () => {
 
         expect(connection.status).toBe("connected");
         expect(connection.transportKind).toBe("streamable-http");
+        expect(connection.protocol.era).toBe("legacy");
         expect(metadata.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen", "fail_soft"]);
         expect(metadata.resources.map((resource) => resource.uri)).toEqual(["fixture://http-readme"]);
+      });
+    } finally {
+      await fixture.stop();
+    }
+  });
+
+  it("uses SDK 2 automatic pagination for tool metadata", async () => {
+    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-streamable-fixture.mjs"), {
+      env: { PAGINATE_TOOLS: "1" },
+    });
+    try {
+      await withManager(async (manager) => {
+        const connection = await manager.connect("remote", { url: fixture.url }, { cwd: repoRoot, timeoutMs: 2_000 });
+        const metadata = await discoverServerMetadata(connection.client, { timeout: 2_000 });
+
+        expect(metadata.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen", "fail_soft"]);
+        expect((await fetchFixtureStats(fixture.url)).methods["tools/list"]).toBe(2);
+      });
+    } finally {
+      await fixture.stop();
+    }
+  });
+
+  it("auto negotiates the modern protocol and sends the required version header", async () => {
+    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-streamable-fixture.mjs"));
+    try {
+      await withManager(async (manager) => {
+        const connection = await manager.connect(
+          "remote",
+          { url: fixture.url, protocolVersion: "auto" },
+          { cwd: repoRoot, timeoutMs: 2_000 },
+        );
+        const stats = await fetchFixtureStats(fixture.url);
+
+        expect(connection.protocol.era).toBe("modern");
+        expect(connection.protocol.version).toBe("2026-07-28");
+        expect(stats.methods["server/discover"]).toBe(1);
+        expect(stats.protocolHeaders).toEqual(["2026-07-28"]);
+      });
+    } finally {
+      await fixture.stop();
+    }
+  });
+
+  it("reuses prior modern discovery without probing again", async () => {
+    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-streamable-fixture.mjs"));
+    const firstManager = new McpServerManager();
+    const secondManager = new McpServerManager();
+    try {
+      const first = await firstManager.connect(
+        "remote",
+        { url: fixture.url, protocolVersion: "auto" },
+        { cwd: repoRoot, timeoutMs: 2_000 },
+      );
+      expect(first.protocol.era).toBe("modern");
+      if (first.protocol.era !== "modern") throw new Error("Expected modern protocol.");
+      await firstManager.closeAll();
+
+      const second = await secondManager.connect(
+        "remote",
+        { url: fixture.url, protocolVersion: "auto" },
+        {
+          cwd: repoRoot,
+          timeoutMs: 2_000,
+          prior: { kind: "modern", discover: first.protocol.discover },
+        },
+      );
+      const stats = await fetchFixtureStats(fixture.url);
+
+      expect(second.protocol.era).toBe("modern");
+      expect(stats.methods["server/discover"]).toBe(1);
+    } finally {
+      await firstManager.closeAll();
+      await secondManager.closeAll();
+      await fixture.stop();
+    }
+  });
+
+  it("continues pinned negotiation after a corrective unsupported-version response", async () => {
+    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-streamable-fixture.mjs"), {
+      env: { CORRECT_DISCOVER_ONCE: "1" },
+    });
+    try {
+      await withManager(async (manager) => {
+        const connection = await manager.connect(
+          "remote",
+          { url: fixture.url, protocolVersion: "2026-07-28" },
+          { cwd: repoRoot, timeoutMs: 2_000 },
+        );
+        const stats = await fetchFixtureStats(fixture.url);
+
+        expect(connection.protocol).toMatchObject({ era: "modern", version: "2026-07-28" });
+        expect(stats.methods["server/discover"]).toBe(2);
+        expect(stats.corrected).toBe(true);
+        expect(new Set(stats.requestIds).size).toBe(2);
       });
     } finally {
       await fixture.stop();
@@ -186,7 +309,7 @@ describe("McpServerManager stdio", () => {
     try {
       await withManager(async (manager) => {
         const connection = await manager.connect("remote", { url: fixture.url, headers: { "x-fixture-header": "present" } }, { cwd: repoRoot, timeoutMs: 2_000 });
-        const result = await connection.client.callTool({ name: "headers_seen", arguments: {} }, undefined, { timeout: 2_000 });
+        const result = await connection.client.callTool({ name: "headers_seen", arguments: {} }, { timeout: 2_000 });
 
         expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ authorization: "missing", fixture: "present" }) }]);
       });
@@ -255,7 +378,7 @@ describe("McpServerManager stdio", () => {
           { url: fixture.url, auth: "oauth", oauth: { clientId: "client-id", clientSecret: "client-secret-test-value", redirectUri: fixture.redirectUri } },
           { cwd: repoRoot, home, timeoutMs: 2_000 },
         );
-        const result = await connection.client.callTool({ name: "headers_seen", arguments: {} }, undefined, { timeout: 2_000 });
+        const result = await connection.client.callTool({ name: "headers_seen", arguments: {} }, { timeout: 2_000 });
 
         expect(connection.transportKind).toBe("streamable-http");
         expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ authorization: "present", fixture: "missing" }) }]);
@@ -304,88 +427,24 @@ describe("McpServerManager stdio", () => {
     }
   });
 
-  it("auto mode falls back to SSE when streamable HTTP fails", async () => {
-    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-sse-fixture.mjs"));
-    try {
-      await withManager(async (manager) => {
-        const connection = await manager.connect("remote", { url: fixture.url }, { cwd: repoRoot, timeoutMs: 2_000 });
-        const metadata = await discoverServerMetadata(connection.client, { timeout: 2_000 });
-
-        expect(connection.transportKind).toBe("sse");
-        expect(metadata.tools.map((tool) => tool.name)).toEqual(["echo", "headers_seen"]);
-      });
-    } finally {
-      await fixture.stop();
-    }
-  });
-
-  it("forced SSE mode skips streamable HTTP and connects directly", async () => {
-    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-sse-fixture.mjs"));
-    try {
-      await withManager(async (manager) => {
-        const connection = await manager.connect("remote", { url: fixture.url, transport: "sse" }, { cwd: repoRoot, timeoutMs: 2_000 });
-
-        expect(connection.transportKind).toBe("sse");
-      });
-    } finally {
-      await fixture.stop();
-    }
-  });
-
-  it("forced streamable HTTP mode does not fallback to SSE", async () => {
-    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-sse-fixture.mjs"));
-    try {
-      await withManager(async (manager) => {
-        await expect(manager.connect("remote", { url: fixture.url, transport: "streamable-http" }, { cwd: repoRoot, timeoutMs: 2_000 })).rejects.toThrow(/Streamable HTTP failed/);
-
-        expect(manager.getConnection("remote")).toBeUndefined();
-      });
-    } finally {
-      await fixture.stop();
-    }
-  });
-
-  it("sends custom headers on SSE initial stream and POST requests", async () => {
-    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-sse-fixture.mjs"), {
-      env: { REQUIRE_HEADER_NAME: "x-fixture-header", REQUIRE_HEADER_VALUE: "present" },
-    });
+  it("deprecated sse mode uses Streamable HTTP without fallback", async () => {
+    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-streamable-fixture.mjs"));
     try {
       await withManager(async (manager) => {
         const connection = await manager.connect(
           "remote",
-          { url: fixture.url, transport: "sse", headers: { "x-fixture-header": "present" } },
+          { url: fixture.url, transport: "sse" },
           { cwd: repoRoot, timeoutMs: 2_000 },
         );
-        const result = await connection.client.callTool({ name: "headers_seen", arguments: {} }, undefined, { timeout: 2_000 });
 
-        expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ authorization: "missing", fixture: "present" }) }]);
+        expect(connection.transportKind).toBe("streamable-http");
       });
     } finally {
       await fixture.stop();
     }
   });
 
-  it("sends bearer token on SSE initial stream and POST requests", async () => {
-    const fixture = await startHttpFixture(join(repoRoot, "tests/fixtures/http-sse-fixture.mjs"), {
-      env: { REQUIRE_BEARER: "secret" },
-    });
-    try {
-      await withManager(async (manager) => {
-        const connection = await manager.connect(
-          "remote",
-          { url: fixture.url, transport: "sse", auth: "bearer", bearerTokenEnv: "MY_TOKEN" },
-          { cwd: repoRoot, timeoutMs: 2_000, env: { MY_TOKEN: "secret" } },
-        );
-        const result = await connection.client.callTool({ name: "headers_seen", arguments: {} }, undefined, { timeout: 2_000 });
-
-        expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ authorization: "present", fixture: "missing" }) }]);
-      });
-    } finally {
-      await fixture.stop();
-    }
-  });
-
-  it("when both streamable and SSE fail, error mentions both attempts without secrets", async () => {
+  it("HTTP failure reports only the Streamable HTTP attempt without secrets", async () => {
     await withManager(async (manager) => {
       let message = "";
       try {
@@ -395,7 +454,7 @@ describe("McpServerManager stdio", () => {
       }
 
       expect(message).toContain("Streamable HTTP failed");
-      expect(message).toContain("SSE fallback failed");
+      expect(message).not.toContain("SSE");
       expect(message).not.toContain("secret-token");
       expect(manager.getConnection("remote")).toBeUndefined();
     });

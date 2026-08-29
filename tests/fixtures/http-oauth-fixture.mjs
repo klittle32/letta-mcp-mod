@@ -1,8 +1,6 @@
 import http from "node:http";
 import { Buffer } from "node:buffer";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createMcpHandler, Server } from "@modelcontextprotocol/server";
 
 const issuedCodes = new Set();
 const validAccessTokens = new Set(["fixture-access-token", "fixture-access-token-refreshed", "fixture-client-credentials-token"]);
@@ -35,7 +33,7 @@ function createFixtureServer(req) {
     { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler("tools/list", async () => ({
     tools: [
       {
         name: "echo",
@@ -50,14 +48,14 @@ function createFixtureServer(req) {
     ],
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler("tools/call", async (request) => {
     if (request.params.name === "echo") {
       return { content: [{ type: "text", text: String(request.params.arguments?.message ?? "") }] };
     }
     if (request.params.name === "headers_seen") {
       return { content: [{ type: "text", text: JSON.stringify({
-        authorization: req.headers.authorization ? "present" : "missing",
-        fixture: req.headers["x-fixture-header"] ?? "missing",
+        authorization: req.headers.get("authorization") ? "present" : "missing",
+        fixture: req.headers.get("x-fixture-header") ?? "missing",
       }) }] };
     }
     throw new Error(`Unknown tool: ${request.params.name}`);
@@ -65,6 +63,11 @@ function createFixtureServer(req) {
 
   return server;
 }
+
+const mcpHandler = createMcpHandler(
+  ({ requestInfo }) => createFixtureServer(requestInfo),
+  { responseMode: "json" },
+);
 
 function parseClientAuth(req, params) {
   const auth = req.headers.authorization;
@@ -188,18 +191,12 @@ const httpServer = http.createServer(async (req, res) => {
     return;
   }
 
-  const mcpServer = createFixtureServer(req);
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  const body = await readBody(req);
   try {
-    await mcpServer.connect(transport);
-    await transport.handleRequest(req, res);
+    const response = await mcpHandler.fetch(toWebRequest(req, body));
+    await sendWebResponse(res, response);
   } catch (error) {
     if (!res.headersSent) text(res, 500, error instanceof Error ? error.message : String(error));
-  } finally {
-    res.on("close", () => {
-      transport.close().catch(() => undefined);
-      mcpServer.close().catch(() => undefined);
-    });
   }
 });
 
@@ -209,4 +206,28 @@ httpServer.listen(0, "127.0.0.1", () => {
   process.stdout.write(`${JSON.stringify({ url: `http://127.0.0.1:${address.port}/mcp` })}\n`);
 });
 
-process.on("SIGTERM", () => httpServer.close(() => process.exit(0)));
+process.on("SIGTERM", () => {
+  mcpHandler.close().finally(() => httpServer.close(() => process.exit(0)));
+});
+
+function toWebRequest(req, body) {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(name, item);
+    } else if (value !== undefined) {
+      headers.set(name, value);
+    }
+  }
+  return new Request(`http://${req.headers.host}${req.url}`, {
+    method: req.method,
+    headers,
+    body: body || undefined,
+  });
+}
+
+async function sendWebResponse(res, response) {
+  const headers = Object.fromEntries(response.headers.entries());
+  res.writeHead(response.status, headers);
+  res.end(Buffer.from(await response.arrayBuffer()));
+}

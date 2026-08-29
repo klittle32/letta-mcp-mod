@@ -1,6 +1,4 @@
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Client, RequestOptions, Resource, Tool } from "@modelcontextprotocol/client";
 import type { CachedResource, CachedTool } from "../core/cache.js";
 
 export interface DiscoveredMetadata {
@@ -8,15 +6,16 @@ export interface DiscoveredMetadata {
   resources: CachedResource[];
 }
 
-const MAX_METADATA_PAGES = 1_000;
-
 export async function discoverServerMetadata(client: Client, options: RequestOptions = {}): Promise<DiscoveredMetadata> {
-  const [tools, resources] = await Promise.all([
-    listAllTools(client, options),
-    listAllResources(client, options).catch(() => []),
+  const [toolResult, resourceResult] = await Promise.all([
+    client.listTools(undefined, options),
+    client.listResources(undefined, options).catch(() => ({ resources: [] })),
   ]);
 
-  return { tools: normalizeTools(tools), resources: normalizeResources(resources) };
+  return {
+    tools: normalizeTools(toolResult.tools),
+    resources: normalizeResources(resourceResult.resources),
+  };
 }
 
 export function normalizeTools(tools: Array<Pick<Tool, "name" | "description" | "inputSchema" | "_meta">>): CachedTool[] {
@@ -36,39 +35,6 @@ export function normalizeResources(resources: Array<Pick<Resource, "uri" | "name
     if (resource.description) cached.description = resource.description;
     return cached;
   });
-}
-
-async function listAllTools(client: Client, options: RequestOptions): Promise<Tool[]> {
-  const tools: Tool[] = [];
-  const seenCursors = new Set<string>();
-  for (let page = 0, cursor: string | undefined = undefined; ; page += 1) {
-    if (page >= MAX_METADATA_PAGES) throw new Error(`MCP tools metadata pagination exceeded ${MAX_METADATA_PAGES} pages.`);
-    const result = await client.listTools(cursor ? { cursor } : undefined, options);
-    tools.push(...result.tools);
-    cursor = validateNextCursor("tools", result.nextCursor, seenCursors);
-    if (!cursor) break;
-  }
-  return tools;
-}
-
-async function listAllResources(client: Client, options: RequestOptions): Promise<Resource[]> {
-  const resources: Resource[] = [];
-  const seenCursors = new Set<string>();
-  for (let page = 0, cursor: string | undefined = undefined; ; page += 1) {
-    if (page >= MAX_METADATA_PAGES) throw new Error(`MCP resources metadata pagination exceeded ${MAX_METADATA_PAGES} pages.`);
-    const result = await client.listResources(cursor ? { cursor } : undefined, options);
-    resources.push(...result.resources);
-    cursor = validateNextCursor("resources", result.nextCursor, seenCursors);
-    if (!cursor) break;
-  }
-  return resources;
-}
-
-function validateNextCursor(kind: "tools" | "resources", cursor: string | undefined, seenCursors: Set<string>): string | undefined {
-  if (!cursor) return undefined;
-  if (seenCursors.has(cursor)) throw new Error(`MCP ${kind} metadata pagination repeated cursor "${cursor}".`);
-  seenCursors.add(cursor);
-  return cursor;
 }
 
 function readStringMeta(meta: Record<string, unknown> | undefined, key: string): string | undefined {

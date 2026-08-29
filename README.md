@@ -11,7 +11,8 @@ A Letta Code port of the `pi-mcp-adapter` pattern: a lazy, context-efficient MCP
 - Transparent metadata refresh when search needs current information.
 - Aggregate output guarding with private spill files for oversized results.
 - Metadata caching under `~/.letta/mcp-adapter/cache.json`.
-- Stdio, streamable HTTP, and SSE MCP transports.
+- Stdio and Streamable HTTP MCP transports.
+- MCP protocol-version negotiation with cached discovery results.
 - HTTP bearer auth and OAuth authorization-code / client-credentials flows.
 - Optional direct tool registration from cache only.
 - Guarded Letta permission overlay plus status/panel UI integration when the host supports it.
@@ -20,7 +21,7 @@ A Letta Code port of the `pi-mcp-adapter` pattern: a lazy, context-efficient MCP
 
 - Letta Code with local mod support.
 - Bun for local development/builds.
-- Node.js available for stdio MCP servers that use Node commands.
+- Node.js 20 or newer.
 
 ## Install and build
 
@@ -144,6 +145,7 @@ Prefer `bearerTokenEnv` over an inline token:
     "remote": {
       "url": "https://mcp.example.com/mcp",
       "transport": "streamable-http",
+      "protocolVersion": "auto",
       "auth": "bearer",
       "bearerTokenEnv": "MCP_REMOTE_TOKEN",
       "headers": {
@@ -160,7 +162,22 @@ Run Letta Code with `MCP_REMOTE_TOKEN` in the environment, then:
 /lmcp reconnect remote
 ```
 
-You can force SSE instead with `"transport": "sse"`. If omitted or set to `"auto"`, the adapter tries streamable HTTP and falls back to SSE.
+Streamable HTTP is the only HTTP transport. Omitting `transport`, using
+`"auto"`, or using `"streamable-http"` all select it. The deprecated `"sse"`
+value emits a warning and is treated as Streamable HTTP; there is no SSE
+fallback.
+
+`protocolVersion` controls MCP protocol negotiation for both HTTP and stdio
+servers:
+
+- `"legacy"` (the default) connects without a discovery probe.
+- `"auto"` discovers modern protocol support and falls back to legacy when
+  appropriate.
+- `"2026-07-28"` requires that modern protocol version.
+
+Successful negotiation is cached with the server configuration, so later
+connections can skip redundant discovery. Changing connection configuration
+invalidates that result.
 
 ### OAuth authorization-code server
 

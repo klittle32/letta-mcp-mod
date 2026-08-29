@@ -1,18 +1,12 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 const server = new Server(
   { name: "letta-mcp-fixture", version: "1.0.0" },
   { capabilities: { tools: {}, resources: {} } },
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
+server.setRequestHandler("tools/list", async () => ({
   tools: [
     {
       name: "echo",
@@ -46,7 +40,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+server.setRequestHandler("resources/list", async () => ({
   resources: [
     {
       uri: "fixture://readme",
@@ -63,7 +57,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
   ],
 }));
 
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+server.setRequestHandler("resources/read", async (request) => {
   if (request.params.uri === "fixture://readme") {
     return { contents: [{ uri: "fixture://readme", text: "Fixture README content", mimeType: "text/plain" }] };
   }
@@ -73,7 +67,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   throw new Error(`Unknown resource: ${request.params.uri}`);
 });
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler("tools/call", async (request) => {
   if (request.params.name === "echo") {
     return { content: [{ type: "text", text: String(request.params.arguments?.message ?? "") }] };
   }

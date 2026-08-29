@@ -1,6 +1,11 @@
 import { randomBytes } from "node:crypto";
-import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type {
+  OAuthClientInformationMixed,
+  OAuthClientMetadata,
+  OAuthClientProvider,
+  OAuthDiscoveryState,
+  OAuthTokens,
+} from "@modelcontextprotocol/client";
 import type { ServerEntry, OAuthConfig } from "../core/config.js";
 import { InvalidServerConfigError } from "./errors.js";
 import {

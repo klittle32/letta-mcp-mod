@@ -1,11 +1,15 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  type DiscoverResult,
+  type PriorDiscovery,
+  type Transport,
+  type VersionNegotiationMode,
+} from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import type { ServerEntry } from "../core/config.js";
 import { InvalidServerConfigError } from "./errors.js";
-import { mergeHeaders, resolveHttpHeaders, resolveHttpMode, resolveHttpUrl, type HttpTransportKind } from "./http.js";
+import { resolveHttpHeaders, resolveHttpMode, resolveHttpUrl } from "./http.js";
 import { assertOAuthServerConfig, createOAuthProvider, isOAuthEnabled } from "./oauth-provider.js";
 import { buildServerEnv, resolveServerCwd } from "./stdio.js";
 
@@ -15,9 +19,14 @@ export interface ConnectOptions {
   home?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  prior?: PriorDiscovery;
 }
 
-export type McpTransportKind = "stdio" | "streamable-http" | "sse";
+export type McpTransportKind = "stdio" | "streamable-http";
+
+export type NegotiatedProtocol =
+  | { era: "legacy"; version: string }
+  | { era: "modern"; version: string; discover: DiscoverResult };
 
 export interface McpConnection {
   serverName: string;
@@ -25,6 +34,7 @@ export interface McpConnection {
   client: Client;
   transport: Transport;
   transportKind: McpTransportKind;
+  protocol: NegotiatedProtocol;
   close(): Promise<void>;
 }
 
@@ -80,7 +90,7 @@ export class McpServerManager {
   private async createHttpConnection(serverName: string, definition: ServerEntry, options: ConnectOptions): Promise<McpConnection> {
     if (options.signal?.aborted) throw new Error(`Failed to connect to "${serverName}": request was aborted.`);
 
-    const mode = resolveHttpMode(definition);
+    resolveHttpMode(definition);
     const url = resolveHttpUrl(serverName, definition);
     assertOAuthServerConfig(serverName, definition);
     const oauthProvider = isOAuthEnabled(definition)
@@ -88,88 +98,46 @@ export class McpServerManager {
       : undefined;
     const headers = oauthProvider ? { ...(definition.headers ?? {}) } : resolveHttpHeaders(serverName, definition, options.env ?? process.env);
 
-    if (mode === "streamable-http") {
-      try {
-        return await this.createHttpTransportConnection("streamable-http", serverName, url, headers, options, oauthProvider);
-      } catch (error) {
-        throw new Error(`Failed to connect to "${serverName}": ${errorMessage(error)}`);
-      }
-    }
-
-    if (mode === "sse") {
-      try {
-        return await this.createHttpTransportConnection("sse", serverName, url, headers, options, oauthProvider);
-      } catch (error) {
-        throw new Error(`Failed to connect to "${serverName}": ${errorMessage(error)}`);
-      }
-    }
-
-    let streamableError: unknown;
     try {
-      return await this.createHttpTransportConnection("streamable-http", serverName, url, headers, options, oauthProvider);
+      return await this.createHttpTransportConnection(serverName, definition, url, headers, options, oauthProvider);
     } catch (error) {
-      streamableError = error;
-    }
-
-    try {
-      return await this.createHttpTransportConnection("sse", serverName, url, headers, options, oauthProvider);
-    } catch (sseError) {
-      throw new Error(`Failed to connect to "${serverName}" over HTTP MCP. ${errorMessage(streamableError)}. ${errorMessage(sseError)}.`);
+      throw new Error(`Failed to connect to "${serverName}": ${errorMessage(error)}`);
     }
   }
 
   private async createHttpTransportConnection(
-    kind: HttpTransportKind,
     serverName: string,
+    definition: ServerEntry,
     url: URL,
     headers: Record<string, string>,
     options: ConnectOptions,
     oauthProvider: ReturnType<typeof createOAuthProvider> | undefined,
   ): Promise<McpConnection> {
-    const client = new Client({ name: "letta-mcp-adapter", version: "0.1.0" }, { capabilities: {} });
-    const transport: Transport = kind === "streamable-http"
-      ? new StreamableHTTPClientTransport(url, { requestInit: { headers }, authProvider: oauthProvider })
-      : new SSEClientTransport(url, {
-        authProvider: oauthProvider,
-        requestInit: { headers },
-        eventSourceInit: {
-          fetch: async (input, init) => fetch(input, {
-            ...init,
-            headers: mergeHeaders(init?.headers, headers),
-          }),
-        },
-      });
-
-    const connection: McpConnection = {
-      serverName,
-      status: "connected",
-      client,
-      transport,
-      transportKind: kind,
-      close: async () => {
-        if (connection.status === "closed") return;
-        connection.status = "closed";
-        await client.close();
-      },
-    };
+    const client = createClient(definition);
+    const transport = new StreamableHTTPClientTransport(url, {
+      requestInit: { headers },
+      authProvider: oauthProvider,
+    });
 
     try {
-      await client.connect(transport, { signal: options.signal, timeout: options.timeoutMs ?? 10_000 });
+      await client.connect(transport, {
+        signal: options.signal,
+        timeout: options.timeoutMs ?? 10_000,
+        prior: options.prior,
+      });
       if (options.signal?.aborted) throw new Error("request was aborted");
-      return connection;
+      return createConnectionRecord(serverName, client, transport, "streamable-http");
     } catch (error) {
-      connection.status = "failed";
       await client.close().catch(() => undefined);
       await transport.close().catch(() => undefined);
-      const label = kind === "streamable-http" ? "Streamable HTTP" : "SSE fallback";
-      throw new Error(`${label} failed: ${errorMessage(error)}`);
+      throw new Error(`Streamable HTTP failed: ${errorMessage(error)}`);
     }
   }
 
   private async createStdioConnection(serverName: string, definition: ServerEntry, options: ConnectOptions): Promise<McpConnection> {
     if (options.signal?.aborted) throw new Error(`Failed to connect to "${serverName}": request was aborted.`);
 
-    const client = new Client({ name: "letta-mcp-adapter", version: "0.1.0" }, { capabilities: {} });
+    const client = createClient(definition);
     const transport = new StdioClientTransport({
       command: definition.command!,
       args: definition.args ?? [],
@@ -177,30 +145,70 @@ export class McpServerManager {
       env: buildServerEnv(definition.env, options.env ?? process.env),
       stderr: "pipe",
     });
-    const connection: McpConnection = {
-      serverName,
-      status: "connected",
-      client,
-      transport,
-      transportKind: "stdio",
-      close: async () => {
-        if (connection.status === "closed") return;
-        connection.status = "closed";
-        await client.close();
-      },
-    };
-
     try {
-      await client.connect(transport, { signal: options.signal, timeout: options.timeoutMs ?? 10_000 });
+      await client.connect(transport, {
+        signal: options.signal,
+        timeout: options.timeoutMs ?? 10_000,
+        prior: options.prior,
+      });
       if (options.signal?.aborted) throw new Error("request was aborted");
-      return connection;
+      return createConnectionRecord(serverName, client, transport, "stdio");
     } catch (error) {
-      connection.status = "failed";
+      await client.close().catch(() => undefined);
       await transport.close().catch(() => undefined);
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Failed to connect to "${serverName}": ${message}`);
     }
   }
+}
+
+function createClient(definition: ServerEntry): Client {
+  return new Client(
+    { name: "letta-mcp-adapter", version: "0.1.0" },
+    {
+      capabilities: {},
+      listMaxPages: 10,
+      versionNegotiation: { mode: resolveVersionNegotiationMode(definition.protocolVersion) },
+    },
+  );
+}
+
+function resolveVersionNegotiationMode(protocolVersion: ServerEntry["protocolVersion"]): VersionNegotiationMode {
+  if (protocolVersion === "auto") return "auto";
+  if (protocolVersion === "2026-07-28") return { pin: protocolVersion };
+  return "legacy";
+}
+
+function createConnectionRecord(
+  serverName: string,
+  client: Client,
+  transport: Transport,
+  transportKind: McpTransportKind,
+): McpConnection {
+  const version = client.getNegotiatedProtocolVersion();
+  const era = client.getProtocolEra();
+  if (!version || !era) throw new Error("MCP connection completed without a negotiated protocol version.");
+
+  const discover = client.getDiscoverResult();
+  if (era === "modern" && !discover) throw new Error("Modern MCP connection completed without a discovery result.");
+  const protocol: NegotiatedProtocol = era === "modern"
+    ? { era, version, discover: discover! }
+    : { era, version };
+
+  const connection: McpConnection = {
+    serverName,
+    status: "connected",
+    client,
+    transport,
+    transportKind,
+    protocol,
+    close: async () => {
+      if (connection.status === "closed") return;
+      connection.status = "closed";
+      await client.close();
+    },
+  };
+  return connection;
 }
 
 function errorMessage(error: unknown): string {

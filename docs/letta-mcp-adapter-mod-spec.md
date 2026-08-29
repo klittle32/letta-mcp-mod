@@ -418,9 +418,8 @@ Goal: support common remote MCP servers.
 
 Features:
 
-- HTTP transport:
-  - Streamable HTTP first
-  - SSE fallback if needed
+- Streamable HTTP transport
+- SDK-level protocol version negotiation
 - Headers
 - Bearer token support:
   - `bearerToken`
@@ -852,7 +851,7 @@ Tests:
 
 - HTTP fixture MCP server
 - Streamable HTTP connect
-- SSE fallback if feasible
+- protocol negotiation and cached discovery
 - headers passed
 - bearer token env read
 - auth missing errors actionable

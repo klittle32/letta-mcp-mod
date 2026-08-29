@@ -1,5 +1,4 @@
-import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { auth, type OAuthTokens } from "@modelcontextprotocol/client";
 import type { AdapterRuntime, RuntimeToolContext } from "../runtime.js";
 import { InvalidServerConfigError } from "../mcp/errors.js";
 import { resolveHttpUrl } from "../mcp/http.js";

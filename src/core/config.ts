@@ -36,6 +36,7 @@ export interface ServerEntry {
   env?: Record<string, string>;
   cwd?: string;
   url?: string;
+  protocolVersion?: "legacy" | "auto" | "2026-07-28";
   transport?: "auto" | "streamable-http" | "sse";
   headers?: Record<string, string>;
   auth?: "oauth" | "bearer" | false;
@@ -155,7 +156,21 @@ export function validateConfig(raw: unknown, path = "<config>", warnings: string
         warnings.push(`Invalid server "${name}" in ${path}: server entry must be an object.`);
         continue;
       }
-      mcpServers[name] = { ...value } as ServerEntry;
+      const server = { ...value } as ServerEntry;
+      if (value.transport === "sse") {
+        warnings.push(`Server "${name}" in ${path} uses deprecated transport "sse"; using "streamable-http".`);
+        server.transport = "streamable-http";
+      }
+      if (
+        value.protocolVersion !== undefined
+        && value.protocolVersion !== "legacy"
+        && value.protocolVersion !== "auto"
+        && value.protocolVersion !== "2026-07-28"
+      ) {
+        warnings.push(`Server "${name}" in ${path} has invalid protocolVersion; using "legacy".`);
+        server.protocolVersion = "legacy";
+      }
+      mcpServers[name] = server;
     }
   }
 
