@@ -69,6 +69,20 @@ function createFixtureServer(req) {
         inputSchema: { type: "object", properties: { message: { type: "string" } } },
       },
     ];
+    if (process.env.MODERN_RESULT_FLOWS === "1") {
+      tools.push(
+        {
+          name: "needs_input",
+          description: "Return an MCP input-required result",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "starts_task",
+          description: "Return an MCP task result without negotiated support",
+          inputSchema: { type: "object", properties: {} },
+        },
+      );
+    }
     if (process.env.PAGINATE_TOOLS === "1") {
       return request.params?.cursor
         ? { tools: tools.slice(1) }
@@ -108,6 +122,36 @@ function createFixtureServer(req) {
     }
     if (request.params.name === "fail_soft") {
       return { isError: true, content: [{ type: "text", text: String(request.params.arguments?.message ?? "fixture http failure") }] };
+    }
+    if (request.params.name === "needs_input") {
+      return {
+        resultType: "input_required",
+        inputRequests: {
+          profile: {
+            method: "elicitation/create",
+            params: {
+              mode: "form",
+              message: "Provide a display name",
+              requestedSchema: {
+                type: "object",
+                properties: { displayName: { type: "string" } },
+                required: ["displayName"],
+              },
+            },
+          },
+        },
+        requestState: "fixture-opaque-continuation-state",
+      };
+    }
+    if (request.params.name === "starts_task") {
+      return {
+        resultType: "task",
+        taskId: "fixture-task-1",
+        status: "working",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        lastUpdatedAt: "2026-01-01T00:00:00.000Z",
+        ttlMs: 60_000,
+      };
     }
     throw new Error(`Unknown tool: ${request.params.name}`);
   });

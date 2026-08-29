@@ -1,5 +1,15 @@
 import { homedir } from "node:os";
-import { ProtocolError, ProtocolErrorCode, SdkError, SdkErrorCode, type PriorDiscovery, type Tool } from "@modelcontextprotocol/client";
+import {
+  isInputRequiredResult,
+  MissingRequiredClientCapabilityError,
+  ProtocolError,
+  ProtocolErrorCode,
+  SdkError,
+  SdkErrorCode,
+  type InputRequiredResult,
+  type PriorDiscovery,
+  type Tool,
+} from "@modelcontextprotocol/client";
 import {
   emptyMetadataCache,
   getMetadataCachePath,
@@ -249,6 +259,7 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
           result = await connection.client.callTool(
             { name: target.originalName, arguments: args },
             {
+              allowInputRequired: true,
               signal: ctx.signal,
               timeout: timeoutMs,
               toolDefinition: toSdkToolDefinition(target),
@@ -260,6 +271,12 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
           }
           throw error;
         }
+        if (isInputRequiredResult(result)) {
+          return {
+            ok: false,
+            message: formatInputRequiredMessage(target, result),
+          };
+        }
         const rendered = renderCallToolResult(result);
         const heading = rendered.isError
           ? `MCP tool "${target.exposedName}" on "${target.serverName}" returned an error.`
@@ -270,6 +287,18 @@ export function createAdapterRuntime(options: AdapterRuntimeOptions = {}): Adapt
         if (isConnectionFailure(error)) await manager.close(target.serverName).catch(() => undefined);
         if (error instanceof ServerNotConfiguredError || error instanceof UnsupportedTransportError || error instanceof InvalidServerConfigError) {
           return { ok: false, message: error.message };
+        }
+        if (isUnfulfillableInputRequest(error)) {
+          return {
+            ok: false,
+            message: `MCP tool "${target.exposedName}" on "${target.serverName}" requires additional input, but Letta Code's public mod API does not provide an interactive input handler for a running tool call. The call was not continued, and no continuation state or unresolved result was retained.`,
+          };
+        }
+        if (isUnsupportedTaskResult(error)) {
+          return {
+            ok: false,
+            message: `MCP tool "${target.exposedName}" on "${target.serverName}" returned an asynchronous task, but the MCP client SDK in this build cannot consume the modern Tasks extension yet. The adapter did not opt in or poll the task. Upgrade after modelcontextprotocol/typescript-sdk#2189 is implemented.`,
+          };
         }
         const message = error instanceof Error ? error.message : String(error);
         const output = `Failed to call MCP tool "${target.exposedName}" on "${target.serverName}": ${message}`;
@@ -300,6 +329,27 @@ function toSdkToolDefinition(target: ToolTarget): Tool {
   } as Tool;
 }
 
+function formatInputRequiredMessage(target: ToolTarget, result: InputRequiredResult): string {
+  const methods = [...new Set(Object.values(result.inputRequests ?? {}).map((request) => request.method))];
+  const requestSummary = methods.length > 0 ? ` (${methods.join(", ")})` : "";
+  return `MCP tool "${target.exposedName}" on "${target.serverName}" requires additional input${requestSummary}. Letta Code's public mod API does not provide an interactive input handler for a running tool call, so the call was not continued. No continuation state or unresolved result was retained.`;
+}
+
+function isUnsupportedTaskResult(error: unknown): boolean {
+  if (!(error instanceof SdkError) || error.code !== SdkErrorCode.UnsupportedResultType) return false;
+  if (!isRecord(error.data)) return false;
+  return error.data.resultType === "task";
+}
+
+function isUnfulfillableInputRequest(error: unknown): boolean {
+  if (!(error instanceof MissingRequiredClientCapabilityError)) return false;
+  const required = error.requiredCapabilities;
+  return error.message.startsWith("Cannot request input ")
+    || "elicitation" in required
+    || "sampling" in required
+    || "roots" in required;
+}
+
 async function discoverMetadataWithRetry(
   client: Parameters<typeof discoverServerMetadata>[0],
   options: Parameters<typeof discoverServerMetadata>[1],
@@ -326,4 +376,8 @@ function isStaleCatalogError(error: unknown): boolean {
   if (error instanceof ProtocolError && error.code === ProtocolErrorCode.InvalidParams) return true;
   const message = error instanceof Error ? error.message : String(error);
   return /unknown tool|tool .+ not found/i.test(message);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

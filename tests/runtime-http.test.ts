@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -91,6 +91,93 @@ describe("adapter runtime HTTP integration", () => {
     } finally {
       await firstRuntime.closeAll();
       await secondRuntime.closeAll();
+      await fixture.stop();
+    }
+  });
+
+  it("renders modern complete results through the normal output path", async () => {
+    const fixture = await startHttpFixture(join(process.cwd(), "tests/fixtures/http-streamable-fixture.mjs"));
+    const { home, cwd } = tempWorkspace();
+    writeConfig(cwd, { remote: { url: fixture.url, protocolVersion: "2026-07-28" } });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    try {
+      const result = await runtime.callTool(
+        { cwd },
+        runtime.loadState({ cwd }),
+        "remote_echo",
+        { message: "modern complete" },
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        output: 'Called "remote_echo" on "remote".\n\nmodern complete',
+      });
+    } finally {
+      await runtime.closeAll();
+      await fixture.stop();
+    }
+  });
+
+  it("intercepts input-required results without exposing or retaining continuation state", async () => {
+    const fixture = await startHttpFixture(
+      join(process.cwd(), "tests/fixtures/http-streamable-fixture.mjs"),
+      { env: { MODERN_RESULT_FLOWS: "1" } },
+    );
+    const { home, cwd } = tempWorkspace();
+    writeConfig(cwd, { remote: { url: fixture.url, protocolVersion: "2026-07-28" } });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    try {
+      await runtime.connectAndRefresh({ cwd }, "remote");
+      const cachePath = getMetadataCachePath(home);
+      const cacheBefore = readFileSync(cachePath, "utf8");
+
+      const result = await runtime.callTool(
+        { cwd },
+        runtime.loadState({ cwd }),
+        "remote_needs_input",
+        {},
+        { maxOutput: 1_000 },
+      );
+
+      expect(result).toMatchObject({ ok: false });
+      if (!result.ok) {
+        expect(result.message).toContain("requires additional input");
+        expect(result.message).toContain("public mod API");
+        expect(result.message).not.toContain("fixture-opaque-continuation-state");
+        expect(result.message).not.toContain("displayName");
+      }
+      expect(readFileSync(cachePath, "utf8")).toBe(cacheBefore);
+      expect(existsSync(join(home, ".letta", "mcp-adapter", "results"))).toBe(false);
+    } finally {
+      await runtime.closeAll();
+      await fixture.stop();
+    }
+  });
+
+  it("returns a specific compatibility failure for unsupported task results", async () => {
+    const fixture = await startHttpFixture(
+      join(process.cwd(), "tests/fixtures/http-streamable-fixture.mjs"),
+      { env: { MODERN_RESULT_FLOWS: "1" } },
+    );
+    const { home, cwd } = tempWorkspace();
+    writeConfig(cwd, { remote: { url: fixture.url, protocolVersion: "2026-07-28" } });
+    const runtime = createAdapterRuntime({ home, timeoutMs: 2_000 });
+    try {
+      const result = await runtime.callTool(
+        { cwd },
+        runtime.loadState({ cwd }),
+        "remote_starts_task",
+        {},
+      );
+
+      expect(result).toMatchObject({ ok: false });
+      if (!result.ok) {
+        expect(result.message).toContain("returned an asynchronous task");
+        expect(result.message).toContain("typescript-sdk#2189");
+        expect(result.message).not.toContain("fixture-task-1");
+      }
+    } finally {
+      await runtime.closeAll();
       await fixture.stop();
     }
   });

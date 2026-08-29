@@ -170,6 +170,7 @@ function createClient(definition: ServerEntry, options: Pick<ConnectOptions, "on
     { name: "letta-mcp-adapter", version: "0.1.0" },
     {
       capabilities: {},
+      inputRequired: { autoFulfill: false },
       listMaxPages: 10,
       listChanged: options.onToolsChanged
         ? {

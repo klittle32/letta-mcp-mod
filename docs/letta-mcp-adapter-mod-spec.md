@@ -239,6 +239,26 @@ interface McpSettings {
 
 Sampling and elicitation settings are reserved but intentionally not advertised to MCP servers yet. The current adapter keeps MCP clients long-lived in the manager and request handlers there do not have a safe scoped Letta conversation/form input API. Until the mod API can provide per-call conversation/fork or form-input context to MCP client request handlers, the adapter must not advertise `sampling` or `elicitation` capabilities.
 
+### Modern result flows
+
+For MCP 2026-07-28 calls, an absent `resultType` and
+`resultType: "complete"` both use the normal renderer and aggregate output
+guard.
+
+The client requests manual delivery of `input_required` where the protocol
+permits it and the runtime branches before rendering. Unresolved input requests
+produce an actionable host-capability failure. Their opaque `requestState` and
+raw request payload are not returned to the model, passed to the spill guard, or
+persisted in adapter metadata.
+
+The adapter does not advertise `io.modelcontextprotocol/tasks`.
+`@modelcontextprotocol/client@2.0.0` has no public modern Tasks extension
+runtime and rejects `resultType: "task"`. Such an SDK rejection is classified
+as a task compatibility failure rather than a generic MCP error. Per-server
+task opt-in and a one-poll-per-call `get_result` tool remain gated on the public
+SDK implementing
+[`tasks/get`, `tasks/update`, and `tasks/cancel`](https://github.com/modelcontextprotocol/typescript-sdk/issues/2189).
+
 ### Cache
 
 ```ts

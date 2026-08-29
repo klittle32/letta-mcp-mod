@@ -13,6 +13,8 @@ A Letta Code port of the `pi-mcp-adapter` pattern: a lazy, context-efficient MCP
 - TTL- and auth-scope-aware metadata caching under `~/.letta/mcp-adapter/cache.json`.
 - Stdio and Streamable HTTP MCP transports.
 - MCP protocol-version negotiation with cached discovery results.
+- Safe MCP 2026 result handling: completed results render normally, while
+  unresolved input and unsupported task results return explicit guidance.
 - HTTP bearer auth and OAuth authorization-code / client-credentials flows.
 - Optional direct tool registration from cache only.
 - Guarded Letta permission overlay plus status/panel UI integration when the host supports it.
@@ -412,6 +414,13 @@ call_tool({
 
 `call_tool` accepts the callable name returned by search and a normal object matching that result's schema. It connects lazily and supports stdio, HTTP, and synthetic resource tools through the same interface.
 
+On MCP 2026-07-28 connections, both explicit `resultType: "complete"` and
+compatibility results without a discriminator use the normal output path.
+`input_required` results are intercepted before rendering or output spilling.
+Letta Code 0.31.5 does not expose an interactive form/input API to a running mod
+tool, so the adapter stops that call with a concise explanation rather than
+displaying or retaining opaque continuation state.
+
 Setup, status, explicit reconnects, and OAuth are intentionally human-facing `/lmcp` operations rather than model tool modes.
 
 ## Metadata cache behavior
@@ -533,5 +542,6 @@ MCP tool titles, annotations, output schemas, icons, and UI resource hints such 
 - Tool and resource results are bounded to 40,000 characters by default; complete oversized results are retained under `~/.letta/mcp-adapter/results/`.
 - OAuth authorization and token requests are bound to the MCP resource, callback issuers are validated, and discovered clients/tokens are isolated by authorization-server issuer. Authorization-code HTTP transports support the SDK's one-retry scope step-up; client-credentials transports fail instead of opening an interactive flow.
 - OAuth state and credentials currently remain in mode-0600 files under `~/.letta/mcp-adapter/auth/`. The adapter's supported installation is one `.mjs` mod file, while OS keychain packages require native companion binaries and Letta Code 0.31.5 does not expose a shared persistent secret API to mod commands/background connections. Use environment interpolation for configured client secrets and `bearerTokenEnv` for static bearer tokens. Native keychain storage requires a supported package-based mod deployment or host secret API.
-- Sampling and elicitation settings are reserved but not advertised to MCP servers yet. The current Letta mod API does not provide a safe scoped conversation/form-input mechanism inside manager-owned MCP request handlers.
+- Sampling and elicitation settings are reserved but not advertised to MCP servers yet. The current Letta mod API does not provide a safe scoped conversation/form-input mechanism inside manager-owned MCP request handlers. If a server returns `input_required` without the necessary advertised capability, the adapter reports the unsupported flow without retaining its opaque state.
+- The adapter does not advertise the modern `io.modelcontextprotocol/tasks` extension. `@modelcontextprotocol/client@2.0.0` rejects task-discriminated `tools/call` results and does not expose the extension's `tasks/get`, `tasks/update`, and `tasks/cancel` flow ([upstream tracker](https://github.com/modelcontextprotocol/typescript-sdk/issues/2189)). A nonconforming server that returns a task without opt-in receives a task-specific compatibility error; no task ID is exposed or polled.
 - Secrets should be provided via environment variables. Do not commit `.env`, bearer tokens, OAuth client secrets, or generated auth stores.
